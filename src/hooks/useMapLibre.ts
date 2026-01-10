@@ -12,7 +12,100 @@ const TERRAIN_EXAGGERATION = 1.2;
 
 const PITCH_3D = 60;
 
+// --- GSI -> Terrain-RGB conversion and custom protocol registration ---
+let _gsidemRegistered = false;
 
+function gsiToTerrainRGBPixel(r: number, g: number, b: number) {
+    // GSI encoding: h_gsi = (R*65536 + G*256 + B) * 0.01
+    const gsiVal = (r << 16) + (g << 8) + b;
+
+    // Treat zero as nodata
+    if (gsiVal === 0) {
+        return [0, 0, 0, 0];
+    }
+
+    const h_gsi = gsiVal * 0.01;
+
+    // Terrain-RGB (Mapbox) packing: h = -10000 + packed * 0.1
+    // therefore packed = (h + 10000) / 0.1
+    const packed = Math.round(h_gsi * 0.1 + 100000);
+
+    const R = (packed >> 16) & 0xff;
+    const G = (packed >> 8) & 0xff;
+    const B = packed & 0xff;
+    return [R, G, B, 255];
+}
+
+function registerGsidemProtocolOnce() {
+    if (_gsidemRegistered) return;
+    _gsidemRegistered = true;
+
+    try {
+        (maplibregl as any).addProtocol('gsidem', (params: any, callback: any) => {
+            let url: string = params.url;
+            url = url.replace(/^\/+/, '');
+
+            fetch(url)
+                .then((res) => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.blob();
+                })
+                .then((blob) => {
+                    const createBitmap = (self as any).createImageBitmap;
+                    if (createBitmap) return createBitmap(blob);
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.crossOrigin = 'anonymous';
+                        img.onload = () => resolve(img);
+                        img.onerror = reject;
+                        img.src = URL.createObjectURL(blob);
+                    });
+                })
+                .then((img: any) => {
+                    const w = img.width;
+                    const h = img.height;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) throw new Error('Canvas context unavailable');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const imageData = ctx.getImageData(0, 0, w, h);
+                    const data = imageData.data;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const R = data[i];
+                        const G = data[i + 1];
+                        const B = data[i + 2];
+                        const out = gsiToTerrainRGBPixel(R, G, B);
+                        data[i] = out[0];
+                        data[i + 1] = out[1];
+                        data[i + 2] = out[2];
+                        data[i + 3] = out[3];
+                    }
+
+                    ctx.putImageData(imageData, 0, 0);
+
+                    return new Promise<ArrayBuffer>((resolve, reject) => {
+                        canvas.toBlob((b) => {
+                            if (!b) return reject(new Error('Failed to create blob'));
+                            b.arrayBuffer().then(resolve, reject);
+                        }, 'image/png');
+                    });
+                })
+                .then((arrayBuffer) => {
+                    callback(null, {
+                        arrayBuffer,
+                        cacheControl: 'max-age=3600',
+                        headers: { 'Content-Type': 'image/png' },
+                    });
+                })
+                .catch((err) => callback(err));
+        });
+    } catch (err) {
+        console.warn('gsidem protocol registration failed', err);
+    }
+}
 
 type BuildingRef = {
     source: string;
@@ -158,9 +251,11 @@ function ensureTerrainResources(map: maplibregl.Map) {
     if (!map.getSource(TERRAIN_SOURCE_ID)) {
         map.addSource(TERRAIN_SOURCE_ID, {
             type: 'raster-dem',
-            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-            encoding: 'terrarium',
+            // Use custom protocol that converts GSI dem_png (Terrarium-like) to Terrain-RGB on the fly
+            tiles: ['gsidem://https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png'],
+            encoding: 'mapbox',
             tileSize: 256,
+            attribution: '国土地理院',
         } as any);
     }
 
@@ -224,6 +319,8 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
 
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
+        // register custom protocol once so gsidem:// URLs are handled
+        registerGsidemProtocolOnce();
 
         const map = new maplibregl.Map({
             container: containerRef.current,
