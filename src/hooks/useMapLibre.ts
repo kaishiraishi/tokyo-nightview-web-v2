@@ -7,100 +7,100 @@ const BUILDINGS_3D_MIN_ZOOM = 15;
 
 const TERRAIN_SOURCE_ID = 'terrain-dem';
 const TERRAIN_HILLSHADE_LAYER_ID = 'terrain-hillshade';
-const TERRAIN_MIN_ZOOM = 12.5; // ここ以上で地形ON（好みで調整）
+const TERRAIN_MIN_ZOOM = 12.5;
 const TERRAIN_EXAGGERATION = 1.2;
 
 const PITCH_3D = 60;
 
-// --- GSI -> Terrain-RGB conversion and custom protocol registration ---
-let _gsidemRegistered = false;
-
-function gsiToTerrainRGBPixel(r: number, g: number, b: number) {
-    // GSI encoding: h_gsi = (R*65536 + G*256 + B) * 0.01
-    const gsiVal = (r << 16) + (g << 8) + b;
-
-    // Treat zero as nodata
-    if (gsiVal === 0) {
-        return [0, 0, 0, 0];
+// --- GSI -> Terrain-RGB conversion logic ---
+const gsidem2terrainrgb = (r: number, g: number, b: number): number[] => {
+    // 1. Calculate height from GSI (meters)
+    let height = r * 655.36 + g * 2.56 + b * 0.01;
+    if (r === 128 && g === 0 && b === 0) {
+        height = 0;
+    } else if (r >= 128) {
+        height -= 167772.16;
     }
 
-    const h_gsi = gsiVal * 0.01;
+    // 2. Convert to Mapbox Terrain-RGB
+    // Formula: (height + 10000) * 10
+    height += 10000;
+    height *= 10;
 
-    // Terrain-RGB (Mapbox) packing: h = -10000 + packed * 0.1
-    // therefore packed = (h + 10000) / 0.1
-    const packed = Math.round(h_gsi * 0.1 + 100000);
+    const tB = (height / 256 - Math.floor(height / 256)) * 256;
+    const tG =
+        (Math.floor(height / 256) / 256 -
+            Math.floor(Math.floor(height / 256) / 256)) *
+        256;
+    const tR =
+        (Math.floor(Math.floor(height / 256) / 256) / 256 -
+            Math.floor(Math.floor(Math.floor(height / 256) / 256) / 256)) *
+        256;
+    return [tR, tG, tB];
+};
 
-    const R = (packed >> 16) & 0xff;
-    const G = (packed >> 8) & 0xff;
-    const B = packed & 0xff;
-    return [R, G, B, 255];
-}
+let _gsidemRegistered = false;
 
 function registerGsidemProtocolOnce() {
     if (_gsidemRegistered) return;
     _gsidemRegistered = true;
 
     try {
-        (maplibregl as any).addProtocol('gsidem', (params: any, callback: any) => {
-            let url: string = params.url;
-            url = url.replace(/^\/+/, '');
+        // MapLibre v5 requires async function that returns Promise<{data: ArrayBuffer}>
+        maplibregl.addProtocol('gsidem', async (params) => {
+            const url = params.url.replace('gsidem://', '');
 
-            fetch(url)
-                .then((res) => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res.blob();
-                })
-                .then((blob) => {
-                    const createBitmap = (self as any).createImageBitmap;
-                    if (createBitmap) return createBitmap(blob);
-                    return new Promise((resolve, reject) => {
-                        const img = new Image();
-                        img.crossOrigin = 'anonymous';
-                        img.onload = () => resolve(img);
-                        img.onerror = reject;
-                        img.src = URL.createObjectURL(blob);
-                    });
-                })
-                .then((img: any) => {
-                    const w = img.width;
-                    const h = img.height;
-                    const canvas = document.createElement('canvas');
-                    canvas.width = w;
-                    canvas.height = h;
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) throw new Error('Canvas context unavailable');
-                    ctx.drawImage(img, 0, 0, w, h);
-                    const imageData = ctx.getImageData(0, 0, w, h);
-                    const data = imageData.data;
+            // Fetch the DEM tile
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
 
-                    for (let i = 0; i < data.length; i += 4) {
-                        const R = data[i];
-                        const G = data[i + 1];
-                        const B = data[i + 2];
-                        const out = gsiToTerrainRGBPixel(R, G, B);
-                        data[i] = out[0];
-                        data[i + 1] = out[1];
-                        data[i + 2] = out[2];
-                        data[i + 3] = out[3];
-                    }
+            const blob = await response.blob();
 
-                    ctx.putImageData(imageData, 0, 0);
+            // Convert to image
+            const imageBitmap = await createImageBitmap(blob);
 
-                    return new Promise<ArrayBuffer>((resolve, reject) => {
-                        canvas.toBlob((b) => {
-                            if (!b) return reject(new Error('Failed to create blob'));
-                            b.arrayBuffer().then(resolve, reject);
-                        }, 'image/png');
-                    });
-                })
-                .then((arrayBuffer) => {
-                    callback(null, {
-                        arrayBuffer,
-                        cacheControl: 'max-age=3600',
-                        headers: { 'Content-Type': 'image/png' },
-                    });
-                })
-                .catch((err) => callback(err));
+            // Draw to canvas and convert pixels
+            const canvas = document.createElement('canvas');
+            canvas.width = imageBitmap.width;
+            canvas.height = imageBitmap.height;
+
+            const context = canvas.getContext('2d');
+            if (!context) {
+                throw new Error('Canvas context unavailable');
+            }
+
+            context.drawImage(imageBitmap, 0, 0);
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // Convert GSI encoding to Terrain-RGB
+            for (let i = 0; i < data.length / 4; i++) {
+                const tRGB = gsidem2terrainrgb(
+                    data[i * 4],
+                    data[i * 4 + 1],
+                    data[i * 4 + 2],
+                );
+                data[i * 4] = tRGB[0];
+                data[i * 4 + 1] = tRGB[1];
+                data[i * 4 + 2] = tRGB[2];
+            }
+
+            context.putImageData(imageData, 0, 0);
+
+            // Convert to PNG ArrayBuffer
+            const finalBlob = await new Promise<Blob>((resolve, reject) => {
+                canvas.toBlob((b) => {
+                    if (b) resolve(b);
+                    else reject(new Error('Canvas toBlob failed'));
+                }, 'image/png');
+            });
+
+            const arrayBuffer = await finalBlob.arrayBuffer();
+
+            // Return v5 format
+            return { data: arrayBuffer };
         });
     } catch (err) {
         console.warn('gsidem protocol registration failed', err);
@@ -180,7 +180,6 @@ function findBuildingRef(map: maplibregl.Map): BuildingRef | null {
     };
 }
 
-// 欠落に強い高さ推定
 function heightExpr(): any {
     return [
         'coalesce',
@@ -200,16 +199,11 @@ function baseHeightExpr(): any {
     ];
 }
 
-/**
- * 重要：高さはzoomで変えない（←これで「ズームで高さが変わる」症状を抑える）
- * フェードはopacityでやる
- */
 function ensure3DBuildings(map: maplibregl.Map): boolean {
     if (map.getLayer(BUILDINGS_3D_LAYER_ID)) return true;
 
     const ref = findBuildingRef(map);
     if (!ref) {
-        console.warn('[3D] No building layer found in this style. 3D buildings skipped.');
         return false;
     }
 
@@ -224,7 +218,6 @@ function ensure3DBuildings(map: maplibregl.Map): boolean {
             'fill-extrusion-color': '#9ca3af',
             'fill-extrusion-height': heightExpr(),
             'fill-extrusion-base': baseHeightExpr(),
-            // ズームで「出現」だけフェード（高さは固定）
             'fill-extrusion-opacity': [
                 'interpolate',
                 ['linear'],
@@ -251,11 +244,10 @@ function ensureTerrainResources(map: maplibregl.Map) {
     if (!map.getSource(TERRAIN_SOURCE_ID)) {
         map.addSource(TERRAIN_SOURCE_ID, {
             type: 'raster-dem',
-            // Use custom protocol that converts GSI dem_png (Terrarium-like) to Terrain-RGB on the fly
             tiles: ['gsidem://https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png'],
-            encoding: 'mapbox',
             tileSize: 256,
             attribution: '国土地理院',
+            maxzoom: 14,
         } as any);
     }
 
@@ -278,7 +270,6 @@ function ensureTerrainResources(map: maplibregl.Map) {
 function setTerrainEnabled(map: maplibregl.Map, enabled: boolean) {
     ensureTerrainResources(map);
 
-    // hillshade は中ズームでも見せたいならここで visible にしてもOK
     map.setLayoutProperty(
         TERRAIN_HILLSHADE_LAYER_ID,
         'visibility',
@@ -294,15 +285,13 @@ function setTerrainEnabled(map: maplibregl.Map, enabled: boolean) {
     if (enabled) {
         anyMap.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION });
     } else {
-        // 無効化（型がうるさい場合があるので any 経由）
         anyMap.setTerrain(null);
     }
 }
 
 function setBuildingsEnabled(map: maplibregl.Map, enabled: boolean) {
     if (enabled) {
-        const ok = ensure3DBuildings(map);
-        if (!ok) return;
+        ensure3DBuildings(map);
     }
     if (!map.getLayer(BUILDINGS_3D_LAYER_ID)) return;
 
@@ -319,7 +308,7 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
 
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
-        // register custom protocol once so gsidem:// URLs are handled
+
         registerGsidemProtocolOnce();
 
         const map = new maplibregl.Map({
@@ -331,7 +320,6 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             bearing: 0,
         });
 
-        // 明示的にスクロールズームを有効化（何らかの理由で無効化されている場合に備える）
         if (map.scrollZoom && typeof map.scrollZoom.enable === 'function') {
             map.scrollZoom.enable();
         }
@@ -358,16 +346,13 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
                     setBuildingsEnabled(map, buildingsOn);
                 }
 
-                // pitchは「どっちかがON」の時だけ付ける（常時は重い）
                 const wantPitch = terrainOn || buildingsOn;
                 map.easeTo({ pitch: wantPitch ? PITCH_3D : 0, duration: 350 });
             };
 
             update();
-            // 連続イベントでアニメーションを擦り合わせないよう、終了時に処理する
             map.on('zoomend', update);
 
-            // style切替したときは custom layer/source が消えるので再注入
             map.on('style.load', () => {
                 lastTerrain = null;
                 lastBuildings = null;
