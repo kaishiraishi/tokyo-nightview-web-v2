@@ -2,116 +2,19 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import maplibregl from 'maplibre-gl';
 import { DEFAULT_STYLE } from '../config/mapStyles';
 
-const BUILDINGS_3D_LAYER_ID = 'buildings-3d';
-const BUILDINGS_3D_MIN_ZOOM = 15;
+// ============================================
+// PLATEAU MVT Configuration
+// ============================================
 
-const TERRAIN_SOURCE_ID = 'terrain-dem';
-const TERRAIN_HILLSHADE_LAYER_ID = 'terrain-hillshade';
-const TERRAIN_MIN_ZOOM = 12.5;
-const TERRAIN_EXAGGERATION = 1.2;
+const PLATEAU_MVT_URL =
+    'https://indigo-lab.github.io/plateau-lod2-mvt/{z}/{x}/{y}.pbf';
 
-const PITCH_3D = 60;
+const PLATEAU_SOURCE_ID = 'plateau-bldg-mvt';
+const PLATEAU_LAYER_ID = 'plateau-bldg-extrusion';
 
-// --- GSI -> Terrain-RGB conversion logic ---
-const gsidem2terrainrgb = (r: number, g: number, b: number): number[] => {
-    // 1. Calculate height from GSI (meters)
-    let height = r * 655.36 + g * 2.56 + b * 0.01;
-    if (r === 128 && g === 0 && b === 0) {
-        height = 0;
-    } else if (r >= 128) {
-        height -= 167772.16;
-    }
-
-    // 2. Convert to Mapbox Terrain-RGB
-    // Formula: (height + 10000) * 10
-    height += 10000;
-    height *= 10;
-
-    const tB = (height / 256 - Math.floor(height / 256)) * 256;
-    const tG =
-        (Math.floor(height / 256) / 256 -
-            Math.floor(Math.floor(height / 256) / 256)) *
-        256;
-    const tR =
-        (Math.floor(Math.floor(height / 256) / 256) / 256 -
-            Math.floor(Math.floor(Math.floor(height / 256) / 256) / 256)) *
-        256;
-    return [tR, tG, tB];
-};
-
-let _gsidemRegistered = false;
-
-function registerGsidemProtocolOnce() {
-    if (_gsidemRegistered) return;
-    _gsidemRegistered = true;
-
-    try {
-        // MapLibre v5 requires async function that returns Promise<{data: ArrayBuffer}>
-        maplibregl.addProtocol('gsidem', async (params) => {
-            const url = params.url.replace('gsidem://', '');
-
-            // Fetch the DEM tile
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const blob = await response.blob();
-
-            // Convert to image
-            const imageBitmap = await createImageBitmap(blob);
-
-            // Draw to canvas and convert pixels
-            const canvas = document.createElement('canvas');
-            canvas.width = imageBitmap.width;
-            canvas.height = imageBitmap.height;
-
-            const context = canvas.getContext('2d');
-            if (!context) {
-                throw new Error('Canvas context unavailable');
-            }
-
-            context.drawImage(imageBitmap, 0, 0);
-            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-
-            // Convert GSI encoding to Terrain-RGB
-            for (let i = 0; i < data.length / 4; i++) {
-                const tRGB = gsidem2terrainrgb(
-                    data[i * 4],
-                    data[i * 4 + 1],
-                    data[i * 4 + 2],
-                );
-                data[i * 4] = tRGB[0];
-                data[i * 4 + 1] = tRGB[1];
-                data[i * 4 + 2] = tRGB[2];
-            }
-
-            context.putImageData(imageData, 0, 0);
-
-            // Convert to PNG ArrayBuffer
-            const finalBlob = await new Promise<Blob>((resolve, reject) => {
-                canvas.toBlob((b) => {
-                    if (b) resolve(b);
-                    else reject(new Error('Canvas toBlob failed'));
-                }, 'image/png');
-            });
-
-            const arrayBuffer = await finalBlob.arrayBuffer();
-
-            // Return v5 format
-            return { data: arrayBuffer };
-        });
-    } catch (err) {
-        console.warn('gsidem protocol registration failed', err);
-    }
-}
-
-type BuildingRef = {
-    source: string;
-    sourceLayer?: string;
-    filter?: any;
-};
+// ============================================
+// Overlay Helpers (for profile line, etc.)
+// ============================================
 
 function ensureOverlays(map: maplibregl.Map) {
     if (!map.getSource('overlays')) {
@@ -151,156 +54,75 @@ function ensureOverlays(map: maplibregl.Map) {
     }
 }
 
-function firstSymbolLayerId(map: maplibregl.Map): string | undefined {
-    const layers = map.getStyle().layers ?? [];
-    const firstSymbol = layers.find((l: any) => l.type === 'symbol');
-    return firstSymbol?.id;
-}
+// ============================================
+// PLATEAU MVT Buildings (fill-extrusion)
+// ============================================
 
-function findBuildingRef(map: maplibregl.Map): BuildingRef | null {
-    const style = map.getStyle();
-    const layers = style.layers ?? [];
+function addPlateauExtrusion(map: maplibregl.Map) {
+    // Add source if not exists
+    if (!map.getSource(PLATEAU_SOURCE_ID)) {
+        map.addSource(PLATEAU_SOURCE_ID, {
+            type: 'vector',
+            tiles: [PLATEAU_MVT_URL],
+            minzoom: 10,
+            maxzoom: 16,
+            attribution: 'Data: "plateau-lod2-mvt" (CC-BY-4.0) / based on Project PLATEAU',
+        });
+        console.log('[PLATEAU] Source added');
+    }
 
-    const candidates = layers.filter((l: any) => {
-        const id = (l.id ?? '').toLowerCase();
-        const srcLayer = (l['source-layer'] ?? '').toLowerCase();
-        return (
-            (l.type === 'fill' || l.type === 'fill-extrusion') &&
-            (id.includes('building') || id.includes('buildings') || srcLayer.includes('building'))
+    // Add layer if not exists
+    if (!map.getLayer(PLATEAU_LAYER_ID)) {
+        // Insert below first symbol layer (labels)
+        const firstSymbolId = map
+            .getStyle()
+            .layers?.find((l) => l.type === 'symbol')?.id;
+
+        map.addLayer(
+            {
+                id: PLATEAU_LAYER_ID,
+                type: 'fill-extrusion',
+                source: PLATEAU_SOURCE_ID,
+                'source-layer': 'bldg', // Fixed for this tileset
+                minzoom: 10,
+                paint: {
+                    'fill-extrusion-color': '#9ca3af',
+                    'fill-extrusion-opacity': 0.9,
+                    'fill-extrusion-height': ['coalesce', ['get', 'z'], 0], // Height in meters
+                    'fill-extrusion-base': 0,
+                },
+            },
+            firstSymbolId
         );
+        console.log('[PLATEAU] Extrusion layer added, beforeId:', firstSymbolId);
+    }
+}
+
+function removePlateauExtrusion(map: maplibregl.Map) {
+    if (map.getLayer(PLATEAU_LAYER_ID)) {
+        map.removeLayer(PLATEAU_LAYER_ID);
+        console.log('[PLATEAU] Layer removed');
+    }
+    if (map.getSource(PLATEAU_SOURCE_ID)) {
+        map.removeSource(PLATEAU_SOURCE_ID);
+        console.log('[PLATEAU] Source removed');
+    }
+}
+
+// Debug: Check if features are loaded
+function debugPlateauFeatures(map: maplibregl.Map) {
+    map.once('idle', () => {
+        const feats = map.querySourceFeatures(PLATEAU_SOURCE_ID, { sourceLayer: 'bldg' });
+        console.log('[PLATEAU] Features loaded:', feats.length);
+        if (feats.length > 0) {
+            console.log('[PLATEAU] Sample properties:', feats.slice(0, 3).map(f => f.properties));
+        }
     });
-
-    const picked = (candidates[0] as any) ?? null;
-    if (!picked?.source) return null;
-
-    return {
-        source: picked.source,
-        sourceLayer: picked['source-layer'],
-        filter: picked.filter,
-    };
 }
 
-function heightExpr(): any {
-    return [
-        'coalesce',
-        ['to-number', ['get', 'render_height'], 0],
-        ['to-number', ['get', 'height'], 0],
-        ['*', ['to-number', ['get', 'levels'], 0], 3],
-        0,
-    ];
-}
-
-function baseHeightExpr(): any {
-    return [
-        'coalesce',
-        ['to-number', ['get', 'render_min_height'], 0],
-        ['to-number', ['get', 'min_height'], 0],
-        0,
-    ];
-}
-
-function ensure3DBuildings(map: maplibregl.Map): boolean {
-    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) return true;
-
-    const ref = findBuildingRef(map);
-    if (!ref) {
-        return false;
-    }
-
-    const beforeId = firstSymbolLayerId(map);
-
-    const layer: any = {
-        id: BUILDINGS_3D_LAYER_ID,
-        type: 'fill-extrusion',
-        source: ref.source,
-        minzoom: BUILDINGS_3D_MIN_ZOOM,
-        paint: {
-            'fill-extrusion-color': '#9ca3af',
-            'fill-extrusion-height': heightExpr(),
-            'fill-extrusion-base': baseHeightExpr(),
-            'fill-extrusion-opacity': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                BUILDINGS_3D_MIN_ZOOM - 0.2,
-                0,
-                BUILDINGS_3D_MIN_ZOOM + 0.3,
-                0.85,
-            ],
-        },
-        layout: {
-            visibility: 'none',
-        },
-    };
-
-    if (ref.sourceLayer) layer['source-layer'] = ref.sourceLayer;
-    if (ref.filter) layer.filter = ref.filter;
-
-    map.addLayer(layer, beforeId);
-    return true;
-}
-
-function ensureTerrainResources(map: maplibregl.Map) {
-    if (!map.getSource(TERRAIN_SOURCE_ID)) {
-        map.addSource(TERRAIN_SOURCE_ID, {
-            type: 'raster-dem',
-            tiles: ['gsidem://https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '国土地理院',
-            maxzoom: 14,
-        } as any);
-    }
-
-    if (!map.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
-        map.addLayer({
-            id: TERRAIN_HILLSHADE_LAYER_ID,
-            type: 'hillshade',
-            source: TERRAIN_SOURCE_ID,
-            paint: {
-                'hillshade-exaggeration': 0.8,
-                'hillshade-shadow-color': 'rgba(0, 0, 0, 0.4)',
-            },
-            layout: {
-                visibility: 'none',
-            },
-        } as any);
-    }
-}
-
-function setTerrainEnabled(map: maplibregl.Map, enabled: boolean) {
-    ensureTerrainResources(map);
-
-    map.setLayoutProperty(
-        TERRAIN_HILLSHADE_LAYER_ID,
-        'visibility',
-        enabled ? 'visible' : 'none'
-    );
-
-    const anyMap = map as any;
-    if (typeof anyMap.setTerrain !== 'function') {
-        console.warn('[Terrain] map.setTerrain is not available in this maplibre-gl version.');
-        return;
-    }
-
-    if (enabled) {
-        anyMap.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION });
-    } else {
-        anyMap.setTerrain(null);
-    }
-}
-
-function setBuildingsEnabled(map: maplibregl.Map, enabled: boolean) {
-    if (enabled) {
-        ensure3DBuildings(map);
-    }
-    if (!map.getLayer(BUILDINGS_3D_LAYER_ID)) return;
-
-    map.setLayoutProperty(
-        BUILDINGS_3D_LAYER_ID,
-        'visibility',
-        enabled ? 'visible' : 'none'
-    );
-}
+// ============================================
+// Main Hook
+// ============================================
 
 export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
     const mapRef = useRef<maplibregl.Map | null>(null);
@@ -309,14 +131,12 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
-        registerGsidemProtocolOnce();
-
         const map = new maplibregl.Map({
             container: containerRef.current,
             style: DEFAULT_STYLE,
-            center: [139.7, 35.68],
-            zoom: 12,
-            pitch: 0,
+            center: [139.76, 35.68], // Tokyo 23-ku area
+            zoom: 15.2,             // Above minzoom 10 for PLATEAU tiles
+            pitch: 60,              // 3D view
             bearing: 0,
         });
 
@@ -324,50 +144,32 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             map.scrollZoom.enable();
         }
 
-        const attachManagers = () => {
+        map.on('load', () => {
+            console.log('[Map] Loaded');
+
             ensureOverlays(map);
 
-            let lastTerrain: boolean | null = null;
-            let lastBuildings: boolean | null = null;
+            // Add PLATEAU buildings
+            addPlateauExtrusion(map);
 
-            const update = () => {
-                const z = map.getZoom();
+            // Debug: check if features are loaded
+            debugPlateauFeatures(map);
 
-                const terrainOn = z >= TERRAIN_MIN_ZOOM;
-                const buildingsOn = z >= BUILDINGS_3D_MIN_ZOOM;
-
-                if (lastTerrain !== terrainOn) {
-                    lastTerrain = terrainOn;
-                    setTerrainEnabled(map, terrainOn);
-                }
-
-                if (lastBuildings !== buildingsOn) {
-                    lastBuildings = buildingsOn;
-                    setBuildingsEnabled(map, buildingsOn);
-                }
-
-                const wantPitch = terrainOn || buildingsOn;
-                map.easeTo({ pitch: wantPitch ? PITCH_3D : 0, duration: 350 });
-            };
-
-            update();
-            map.on('zoomend', update);
-
-            map.on('style.load', () => {
-                lastTerrain = null;
-                lastBuildings = null;
-                update();
-            });
-        };
-
-        map.on('load', () => {
-            attachManagers();
             setIsLoaded(true);
+        });
+
+        // Re-add on style reload
+        map.on('style.load', () => {
+            console.log('[Map] Style reloaded');
+            addPlateauExtrusion(map);
         });
 
         mapRef.current = map;
 
+        // Cleanup
         return () => {
+            console.log('[Map] Cleanup');
+            removePlateauExtrusion(map);
             map.remove();
             mapRef.current = null;
             setIsLoaded(false);

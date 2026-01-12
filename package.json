@@ -10,9 +10,13 @@
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
     },
     "dependencies": {
+        "@deck.gl/core": "^9.2.5",
+        "@deck.gl/geo-layers": "^9.2.5",
+        "@deck.gl/mapbox": "^9.2.5",
+        "@loaders.gl/3d-tiles": "^4.3.4",
+        "maplibre-gl": "^5.0.0",
         "react": "^18.3.1",
-        "react-dom": "^18.3.1",
-        "maplibre-gl": "^5.0.0"
+        "react-dom": "^18.3.1"
     },
     "devDependencies": {
         "@types/react": "^18.3.12",
