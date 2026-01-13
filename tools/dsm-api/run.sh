@@ -17,5 +17,11 @@ pip install -q -r requirements.txt
 
 # Load environment variables and start server
 echo "Starting DSM API server..."
-export $(cat .env | grep -v '^#' | xargs)
-uvicorn server:app --reload --port "${PORT:-8787}"
+if [ -f ".env" ]; then
+    set -a
+    source ".env"
+    set +a
+fi
+
+# Prefer env var overrides; default to 8000 to match frontend dev config
+uvicorn server:app --reload --port "${PORT:-8000}"
