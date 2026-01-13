@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, useMemo, type RefObject } from 'react';
 import maplibregl from 'maplibre-gl';
+import { useGsiTerrainSource } from 'maplibre-gl-gsi-terrain';
 import { DEFAULT_STYLE } from '../config/mapStyles';
 
 // ============================================
@@ -7,13 +8,25 @@ import { DEFAULT_STYLE } from '../config/mapStyles';
 // ============================================
 
 const PLATEAU_MVT_URL =
-    'https://indigo-lab.github.io/plateau-lod2-mvt/{z}/{x}/{y}.pbf';
+    'https://ysk766.github.io/plateau_tokyo_2023_mvt_lod1/{z}/{x}/{y}.pbf';
+
+const SOURCE_LAYER_ID = 'tokyo_all_fixedgeojsonl';
+const HEIGHT_PROPERTY = 'height';
 
 const PLATEAU_SOURCE_ID = 'plateau-bldg-mvt';
 const PLATEAU_LAYER_ID = 'plateau-bldg-extrusion';
 
 // ============================================
-// Overlay Helpers (for profile line, etc.)
+// Terrain Configuration
+// ============================================
+
+const TERRAIN_SOURCE_ID = 'terrainSource';
+const HILLSHADE_SOURCE_ID = 'terrainHillshade';
+const HILLSHADE_LAYER_ID = 'terrainHillshadeLayer';
+const TERRAIN_EXAGGERATION = 1.8;
+
+// ============================================
+// Overlay Helpers
 // ============================================
 
 function ensureOverlays(map: maplibregl.Map) {
@@ -55,69 +68,87 @@ function ensureOverlays(map: maplibregl.Map) {
 }
 
 // ============================================
-// PLATEAU MVT Buildings (fill-extrusion)
+// PLATEAU MVT Buildings
 // ============================================
 
 function addPlateauExtrusion(map: maplibregl.Map) {
-    // Add source if not exists
     if (!map.getSource(PLATEAU_SOURCE_ID)) {
         map.addSource(PLATEAU_SOURCE_ID, {
             type: 'vector',
             tiles: [PLATEAU_MVT_URL],
             minzoom: 10,
-            maxzoom: 16,
-            attribution: 'Data: "plateau-lod2-mvt" (CC-BY-4.0) / based on Project PLATEAU',
+            maxzoom: 15,
+            attribution: 'plateau_tokyo_2023_mvt_lod1',
         });
         console.log('[PLATEAU] Source added');
     }
 
-    // Add layer if not exists
     if (!map.getLayer(PLATEAU_LAYER_ID)) {
-        // Insert below first symbol layer (labels)
-        const firstSymbolId = map
-            .getStyle()
-            .layers?.find((l) => l.type === 'symbol')?.id;
+        const firstSymbolId = map.getStyle().layers?.find((l) => l.type === 'symbol')?.id;
 
         map.addLayer(
             {
                 id: PLATEAU_LAYER_ID,
                 type: 'fill-extrusion',
                 source: PLATEAU_SOURCE_ID,
-                'source-layer': 'bldg', // Fixed for this tileset
+                'source-layer': SOURCE_LAYER_ID,
                 minzoom: 10,
                 paint: {
                     'fill-extrusion-color': '#9ca3af',
                     'fill-extrusion-opacity': 0.9,
-                    'fill-extrusion-height': ['coalesce', ['get', 'z'], 0], // Height in meters
+                    'fill-extrusion-height': ['coalesce', ['get', HEIGHT_PROPERTY], 10],
                     'fill-extrusion-base': 0,
                 },
             },
             firstSymbolId
         );
-        console.log('[PLATEAU] Extrusion layer added, beforeId:', firstSymbolId);
+        console.log('[PLATEAU] Layer added');
+
+        // Debug: check features
+        map.once('idle', () => {
+            const feats = map.querySourceFeatures(PLATEAU_SOURCE_ID, { sourceLayer: SOURCE_LAYER_ID });
+            console.log('[PLATEAU] Features loaded:', feats.length);
+            if (feats.length > 0) {
+                console.log('[PLATEAU] Sample:', feats[0].properties);
+            }
+        });
     }
 }
 
-function removePlateauExtrusion(map: maplibregl.Map) {
-    if (map.getLayer(PLATEAU_LAYER_ID)) {
-        map.removeLayer(PLATEAU_LAYER_ID);
-        console.log('[PLATEAU] Layer removed');
-    }
-    if (map.getSource(PLATEAU_SOURCE_ID)) {
-        map.removeSource(PLATEAU_SOURCE_ID);
-        console.log('[PLATEAU] Source removed');
-    }
-}
+// ============================================
+// GSI Terrain
+// ============================================
 
-// Debug: Check if features are loaded
-function debugPlateauFeatures(map: maplibregl.Map) {
-    map.once('idle', () => {
-        const feats = map.querySourceFeatures(PLATEAU_SOURCE_ID, { sourceLayer: 'bldg' });
-        console.log('[PLATEAU] Features loaded:', feats.length);
-        if (feats.length > 0) {
-            console.log('[PLATEAU] Sample properties:', feats.slice(0, 3).map(f => f.properties));
-        }
-    });
+function addTerrain(
+    map: maplibregl.Map,
+    gsiTerrainSource: maplibregl.SourceSpecification,
+    exaggeration: number
+) {
+    if (!map.getSource(TERRAIN_SOURCE_ID)) {
+        map.addSource(TERRAIN_SOURCE_ID, gsiTerrainSource as any);
+        console.log('[Terrain] Source added');
+    }
+
+    try {
+        map.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration });
+        console.log('[Terrain] Enabled');
+    } catch (err) {
+        console.warn('[Terrain] setTerrain error:', err);
+    }
+
+    if (!map.getSource(HILLSHADE_SOURCE_ID)) {
+        map.addSource(HILLSHADE_SOURCE_ID, { ...(gsiTerrainSource as any) } as any);
+    }
+
+    if (!map.getLayer(HILLSHADE_LAYER_ID)) {
+        map.addLayer({
+            id: HILLSHADE_LAYER_ID,
+            type: 'hillshade',
+            source: HILLSHADE_SOURCE_ID,
+            paint: { 'hillshade-exaggeration': 0.4 },
+        });
+        console.log('[Terrain] Hillshade added');
+    }
 }
 
 // ============================================
@@ -128,53 +159,48 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
     const mapRef = useRef<maplibregl.Map | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
 
+    const gsiTerrainSource = useMemo(
+        () => useGsiTerrainSource(maplibregl.addProtocol, { maxzoom: 14 }),
+        []
+    );
+
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
         const map = new maplibregl.Map({
             container: containerRef.current,
             style: DEFAULT_STYLE,
-            center: [139.76, 35.68], // Tokyo 23-ku area
-            zoom: 15.2,             // Above minzoom 10 for PLATEAU tiles
-            pitch: 60,              // 3D view
+            center: [139.76, 35.68],
+            zoom: 15.2,
+            pitch: 60,
             bearing: 0,
+            maxPitch: 85,
         });
 
-        if (map.scrollZoom && typeof map.scrollZoom.enable === 'function') {
-            map.scrollZoom.enable();
-        }
+        map.scrollZoom?.enable?.();
 
         map.on('load', () => {
             console.log('[Map] Loaded');
-
             ensureOverlays(map);
-
-            // Add PLATEAU buildings
+            addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
-
-            // Debug: check if features are loaded
-            debugPlateauFeatures(map);
-
             setIsLoaded(true);
         });
 
-        // Re-add on style reload
         map.on('style.load', () => {
             console.log('[Map] Style reloaded');
+            addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
         });
 
         mapRef.current = map;
 
-        // Cleanup
         return () => {
-            console.log('[Map] Cleanup');
-            removePlateauExtrusion(map);
             map.remove();
             mapRef.current = null;
             setIsLoaded(false);
         };
-    }, [containerRef]);
+    }, [containerRef, gsiTerrainSource]);
 
     return { map: mapRef.current, isLoaded };
 }
