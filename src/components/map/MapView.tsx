@@ -16,13 +16,51 @@ export function MapView({ onProfileChange }: MapViewProps) {
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
 
+    const [sourceLocation, setSourceLocation] = useState<LngLat | null>(null);
     const [targetLocation, setTargetLocation] = useState<LngLat | null>(null);
+    const [isSettingSource, setIsSettingSource] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Handle map click to set target
+    // Auto-set source location from geolocation when available
     useEffect(() => {
-        if (!map || !isLoaded) return;
+        if (currentLocation) {
+            setSourceLocation(currentLocation);
+        }
+    }, [currentLocation]);
+
+    // Fallback: Use map center when geolocation fails
+    useEffect(() => {
+        if (geoError && map && !sourceLocation) {
+            const center = map.getCenter();
+            setSourceLocation({ lng: center.lng, lat: center.lat });
+        }
+    }, [geoError, map, sourceLocation]);
+
+    // Handle manual source location selection
+    useEffect(() => {
+        if (!map || !isLoaded || !isSettingSource) return;
+
+        const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
+            setSourceLocation({
+                lng: e.lngLat.lng,
+                lat: e.lngLat.lat,
+            });
+            setIsSettingSource(false);
+        };
+
+        map.getCanvas().style.cursor = 'crosshair';
+        map.on('click', handleSourceClick);
+
+        return () => {
+            map.getCanvas().style.cursor = '';
+            map.off('click', handleSourceClick);
+        };
+    }, [map, isLoaded, isSettingSource]);
+
+    // Handle map click to set target (only when not setting source)
+    useEffect(() => {
+        if (!map || !isLoaded || isSettingSource) return;
 
         const handleClick = (e: maplibregl.MapMouseEvent) => {
             setTargetLocation({
@@ -36,11 +74,11 @@ export function MapView({ onProfileChange }: MapViewProps) {
         return () => {
             map.off('click', handleClick);
         };
-    }, [map, isLoaded]);
+    }, [map, isLoaded, isSettingSource]);
 
-    // Fetch profile when both locations are set
+    // Fetch profile when both source and target locations are set
     useEffect(() => {
-        if (!currentLocation || !targetLocation) {
+        if (!sourceLocation || !targetLocation) {
             onProfileChange(null);
             return;
         }
@@ -49,14 +87,14 @@ export function MapView({ onProfileChange }: MapViewProps) {
             setLoading(true);
             setError(null);
             try {
-                const start = new maplibregl.LngLat(currentLocation.lng, currentLocation.lat);
+                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
                 const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
                 const distanceM = start.distanceTo(end);
 
                 // 10m間隔でサンプリング（最低120点、最大500点に制限）
                 const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
 
-                const profile = await fetchProfile(currentLocation, targetLocation, sampleCount);
+                const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
                 onProfileChange(profile);
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Failed to load profile';
@@ -68,7 +106,7 @@ export function MapView({ onProfileChange }: MapViewProps) {
         };
 
         loadProfile();
-    }, [currentLocation, targetLocation, onProfileChange]);
+    }, [sourceLocation, targetLocation, onProfileChange]);
 
     // Center map on current location when available
     useEffect(() => {
@@ -87,6 +125,7 @@ export function MapView({ onProfileChange }: MapViewProps) {
 
             <MapOverlays
                 map={map}
+                sourceLocation={sourceLocation}
                 currentLocation={currentLocation}
                 targetLocation={targetLocation}
             />
@@ -96,28 +135,55 @@ export function MapView({ onProfileChange }: MapViewProps) {
                 <h2 className="text-lg font-semibold mb-2">Tokyo Nightview - Step 1</h2>
 
                 {geoError && (
-                    <div className="text-red-600 text-sm mb-2">
-                        Location error: {geoError}
+                    <div className="text-amber-600 text-sm mb-2 p-2 bg-amber-50 rounded">
+                        <div className="font-semibold">📍 位置情報が利用できません</div>
+                        <div className="mt-1 text-xs">
+                            {geoError.includes('denied') || geoError.includes('permission') ? (
+                                <>
+                                    ブラウザの設定で位置情報を許可してください。<br />
+                                    または地図中心を基準点として使用します。
+                                </>
+                            ) : (
+                                <>位置情報エラー: {geoError}</>
+                            )}
+                        </div>
                     </div>
                 )}
 
-                {currentLocation && (
+                {sourceLocation && (
                     <div className="text-sm text-gray-700 mb-2">
-                        📍 Current: {currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}
+                        📍 基準点: {sourceLocation.lat.toFixed(5)}, {sourceLocation.lng.toFixed(5)}
+                        {currentLocation && sourceLocation === currentLocation && (
+                            <span className="text-xs text-green-600 ml-1">(現在地)</span>
+                        )}
                     </div>
                 )}
 
                 {targetLocation && (
                     <div className="text-sm text-gray-700 mb-2">
-                        🎯 Target: {targetLocation.lat.toFixed(5)}, {targetLocation.lng.toFixed(5)}
+                        🎯 目標点: {targetLocation.lat.toFixed(5)}, {targetLocation.lng.toFixed(5)}
                     </div>
                 )}
 
                 {!targetLocation && (
-                    <div className="text-sm text-gray-500">
-                        Click on the map to select a target point
+                    <div className="text-sm text-gray-500 mb-2">
+                        {isSettingSource ? (
+                            <span className="text-blue-600 font-semibold">地図をクリックして基準点を設定</span>
+                        ) : (
+                            '地図をクリックして目標点を選択'
+                        )}
                     </div>
                 )}
+
+                <div className="flex gap-2 mb-2">
+                    <button
+                        onClick={() => setIsSettingSource(true)}
+                        disabled={isSettingSource}
+                        className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                        基準点を手動設定
+                    </button>
+                </div>
 
                 {loading && (
                     <div className="text-sm text-blue-600">

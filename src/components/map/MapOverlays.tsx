@@ -4,18 +4,34 @@ import type { LngLat } from '../../types/profile';
 
 type MapOverlaysProps = {
     map: maplibregl.Map | null;
+    sourceLocation: LngLat | null;
     currentLocation: LngLat | null;
     targetLocation: LngLat | null;
 };
 
-export function MapOverlays({ map, currentLocation, targetLocation }: MapOverlaysProps) {
+export function MapOverlays({ map, sourceLocation, currentLocation, targetLocation }: MapOverlaysProps) {
     useEffect(() => {
         if (!map) return;
 
         const features: GeoJSON.Feature[] = [];
 
-        // Add current location marker
-        if (currentLocation) {
+        // Add source location marker (blue)
+        if (sourceLocation) {
+            features.push({
+                type: 'Feature',
+                geometry: {
+                    type: 'Point',
+                    coordinates: [sourceLocation.lng, sourceLocation.lat],
+                },
+                properties: {
+                    color: '#3b82f6', // Blue
+                    type: 'source',
+                },
+            });
+        }
+
+        // Add current location marker (green halo) if different from source
+        if (currentLocation && currentLocation !== sourceLocation) {
             features.push({
                 type: 'Feature',
                 geometry: {
@@ -23,7 +39,7 @@ export function MapOverlays({ map, currentLocation, targetLocation }: MapOverlay
                     coordinates: [currentLocation.lng, currentLocation.lat],
                 },
                 properties: {
-                    color: '#3b82f6', // Blue
+                    color: '#10b981', // Green
                     type: 'current',
                 },
             });
@@ -44,14 +60,14 @@ export function MapOverlays({ map, currentLocation, targetLocation }: MapOverlay
             });
         }
 
-        // Add line between current and target
-        if (currentLocation && targetLocation) {
+        // Add line between source and target
+        if (sourceLocation && targetLocation) {
             features.push({
                 type: 'Feature',
                 geometry: {
                     type: 'LineString',
                     coordinates: [
-                        [currentLocation.lng, currentLocation.lat],
+                        [sourceLocation.lng, sourceLocation.lat],
                         [targetLocation.lng, targetLocation.lat],
                     ],
                 },
@@ -66,7 +82,7 @@ export function MapOverlays({ map, currentLocation, targetLocation }: MapOverlay
                 features,
             });
         }
-    }, [map, currentLocation, targetLocation]);
+    }, [map, sourceLocation, currentLocation, targetLocation]);
 
     return null;
 }
