@@ -1,15 +1,17 @@
 import { useEffect } from 'react';
 import type maplibregl from 'maplibre-gl';
-import type { LngLat } from '../../types/profile';
+import type { LngLat, ProfileResponse } from '../../types/profile';
 
 type MapOverlaysProps = {
     map: maplibregl.Map | null;
     sourceLocation: LngLat | null;
     currentLocation: LngLat | null;
     targetLocation: LngLat | null;
+    profile: ProfileResponse | null;
+    hoveredIndex: number | null;
 };
 
-export function MapOverlays({ map, sourceLocation, currentLocation, targetLocation }: MapOverlaysProps) {
+export function MapOverlays({ map, sourceLocation, currentLocation, targetLocation, profile, hoveredIndex }: MapOverlaysProps) {
     useEffect(() => {
         if (!map) return;
 
@@ -75,6 +77,27 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
             });
         }
 
+        // Add hovered point marker (red highlight)
+        if (profile && hoveredIndex !== null) {
+            const lng = profile.lngs[hoveredIndex];
+            const lat = profile.lats[hoveredIndex];
+            const elev = profile.elev_m[hoveredIndex];
+
+            if (elev !== null) {  // Only show if elevation is valid
+                features.push({
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Point',
+                        coordinates: [lng, lat],
+                    },
+                    properties: {
+                        color: '#ef4444',  // Red
+                        type: 'hover',
+                    },
+                });
+            }
+        }
+
         const source = map.getSource('overlays') as maplibregl.GeoJSONSource;
         if (source) {
             source.setData({
@@ -82,7 +105,7 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
                 features,
             });
         }
-    }, [map, sourceLocation, currentLocation, targetLocation]);
+    }, [map, sourceLocation, currentLocation, targetLocation, profile, hoveredIndex]);
 
     return null;
 }

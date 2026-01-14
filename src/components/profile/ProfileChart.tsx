@@ -1,10 +1,19 @@
+import { useState } from 'react';
 import type { ProfileResponse } from '../../types/profile';
 
 type ProfileChartProps = {
     profile: ProfileResponse | null;
+    onHover: (index: number | null) => void;
+    onClick: (index: number) => void;
 };
 
-export function ProfileChart({ profile }: ProfileChartProps) {
+export function ProfileChart({ profile, onHover, onClick }: ProfileChartProps) {
+    const [localHoveredIndex, setLocalHoveredIndex] = useState<number | null>(null);
+
+    const handleHover = (index: number | null) => {
+        setLocalHoveredIndex(index);
+        onHover(index);
+    };
     if (!profile) {
         return (
             <div className="w-full h-full flex items-center justify-center bg-gray-50">
@@ -161,6 +170,110 @@ export function ProfileChart({ profile }: ProfileChartProps) {
                             strokeWidth="2"
                         />
                     ))}
+
+                    {/* Full-width interaction layer - tracks mouse across entire chart */}
+                    <rect
+                        x={0}
+                        y={0}
+                        width={chartWidth}
+                        height={chartHeight}
+                        fill="transparent"
+                        cursor="crosshair"
+                        onMouseMove={(e) => {
+                            const svg = e.currentTarget.ownerSVGElement;
+                            if (!svg) return;
+
+                            const rect = svg.getBoundingClientRect();
+                            const mouseX = e.clientX - rect.left - padding.left;
+
+                            // Clamp mouseX to chart bounds
+                            const clampedMouseX = Math.max(0, Math.min(mouseX, chartWidth));
+
+                            // Find the data point whose x position is closest to the mouse X
+                            let nearestIndex = 0;
+                            let minDiff = Math.abs(xScale(distances_m[0]) - clampedMouseX);
+
+                            for (let i = 1; i < distances_m.length; i++) {
+                                const dataPointX = xScale(distances_m[i]);
+                                const diff = Math.abs(dataPointX - clampedMouseX);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    nearestIndex = i;
+                                }
+                            }
+
+                            // Only show if elevation is valid
+                            if (elev_m[nearestIndex] !== null) {
+                                handleHover(nearestIndex);
+                            }
+                        }}
+                        onMouseLeave={() => handleHover(null)}
+                        onClick={() => {
+                            if (localHoveredIndex !== null) {
+                                onClick(localHoveredIndex);
+                            }
+                        }}
+                    />
+
+                    {/* Hover visualization - vertical line, dot, and tooltip */}
+                    {localHoveredIndex !== null && elev_m[localHoveredIndex] !== null && (
+                        <>
+                            {/* Vertical line */}
+                            <line
+                                x1={xScale(distances_m[localHoveredIndex])}
+                                y1={-padding.top}
+                                x2={xScale(distances_m[localHoveredIndex])}
+                                y2={chartHeight + padding.bottom}
+                                stroke="#ef4444"
+                                strokeWidth="1"
+                                strokeDasharray="4 2"
+                                pointerEvents="none"
+                            />
+                            {/* Highlight dot */}
+                            <circle
+                                cx={xScale(distances_m[localHoveredIndex])}
+                                cy={yScale(elev_m[localHoveredIndex]!)}
+                                r={5}
+                                fill="#ef4444"
+                                stroke="white"
+                                strokeWidth="2"
+                                pointerEvents="none"
+                            />
+                            {/* Tooltip with elevation and distance */}
+                            <g pointerEvents="none">
+                                <rect
+                                    x={xScale(distances_m[localHoveredIndex]) - 40}
+                                    y={yScale(elev_m[localHoveredIndex]!) - 40}
+                                    width="80"
+                                    height="30"
+                                    fill="white"
+                                    stroke="#374151"
+                                    strokeWidth="1"
+                                    rx="4"
+                                    opacity="0.95"
+                                />
+                                <text
+                                    x={xScale(distances_m[localHoveredIndex])}
+                                    y={yScale(elev_m[localHoveredIndex]!) - 28}
+                                    textAnchor="middle"
+                                    fontSize="11"
+                                    fill="#374151"
+                                    fontWeight="600"
+                                >
+                                    {elev_m[localHoveredIndex]!.toFixed(1)}m
+                                </text>
+                                <text
+                                    x={xScale(distances_m[localHoveredIndex])}
+                                    y={yScale(elev_m[localHoveredIndex]!) - 16}
+                                    textAnchor="middle"
+                                    fontSize="9"
+                                    fill="#6b7280"
+                                >
+                                    {(distances_m[localHoveredIndex] / 1000).toFixed(2)}km
+                                </text>
+                            </g>
+                        </>
+                    )}
                 </g>
             </svg>
         </div>

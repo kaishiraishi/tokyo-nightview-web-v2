@@ -6,4 +6,6 @@ export type LngLat = {
 export type ProfileResponse = {
     distances_m: number[];
     elev_m: Array<number | null>;
+    lngs: number[];
+    lats: number[];
 };

@@ -44,6 +44,8 @@ class ProfileRequest(BaseModel):
 class ProfileResponse(BaseModel):
     distances_m: List[float]
     elev_m: List[Optional[float]]
+    lngs: List[float]
+    lats: List[float]
 
 
 @app.on_event("startup")
@@ -133,4 +135,9 @@ def get_profile(req: ProfileRequest):
             else:
                 elev_m[out_i] = val
 
-    return ProfileResponse(distances_m=distances_m, elev_m=elev_m)
+    return ProfileResponse(
+        distances_m=distances_m,
+        elev_m=elev_m,
+        lngs=[lon for lon, lat in points_wgs],
+        lats=[lat for lon, lat in points_wgs],
+    )

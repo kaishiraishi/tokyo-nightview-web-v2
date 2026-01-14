@@ -9,9 +9,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
+    profile: ProfileResponse | null;
+    hoveredIndex: number | null;
+    clickedIndex: number | null;
 };
 
-export function MapView({ onProfileChange }: MapViewProps) {
+export function MapView({ onProfileChange, profile, hoveredIndex, clickedIndex }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
@@ -21,6 +24,7 @@ export function MapView({ onProfileChange }: MapViewProps) {
     const [isSettingSource, setIsSettingSource] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isCollapsed, setIsCollapsed] = useState(false);
 
     // Auto-set source location from geolocation when available
     useEffect(() => {
@@ -108,12 +112,28 @@ export function MapView({ onProfileChange }: MapViewProps) {
         loadProfile();
     }, [sourceLocation, targetLocation, onProfileChange]);
 
+    // Fly to clicked point on profile chart
+    useEffect(() => {
+        if (!map || !profile || clickedIndex === null) return;
+
+        const lng = profile.lngs[clickedIndex];
+        const lat = profile.lats[clickedIndex];
+        const elev = profile.elev_m[clickedIndex];
+
+        if (elev === null) return;  // Skip null elevation points
+
+        map.flyTo({
+            center: [lng, lat],
+            pitch: 60,
+            duration: 1500,
+        });
+    }, [map, profile, clickedIndex]);
+
     // Center map on current location when available
     useEffect(() => {
         if (map && currentLocation && isLoaded) {
             map.flyTo({
                 center: [currentLocation.lng, currentLocation.lat],
-                zoom: 14,
                 duration: 1000,
             });
         }
@@ -128,13 +148,26 @@ export function MapView({ onProfileChange }: MapViewProps) {
                 sourceLocation={sourceLocation}
                 currentLocation={currentLocation}
                 targetLocation={targetLocation}
+                profile={profile}
+                hoveredIndex={hoveredIndex}
             />
 
             {/* Status overlay */}
             <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg p-4 max-w-sm">
-                <h2 className="text-lg font-semibold mb-2">Tokyo Nightview - Step 1</h2>
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold mb-2">Tokyo Nightview - Step 1</h2>
+                    <button
+                        aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+                        onClick={() => setIsCollapsed((s) => !s)}
+                        className="ml-2 text-sm bg-gray-100 hover:bg-gray-200 rounded px-2 py-1"
+                    >
+                        {isCollapsed ? '▾' : '▴'}
+                    </button>
+                </div>
 
-                {geoError && (
+                {!isCollapsed && (
+                    <>
+                        {geoError && (
                     <div className="text-amber-600 text-sm mb-2 p-2 bg-amber-50 rounded">
                         <div className="font-semibold">📍 位置情報が利用できません</div>
                         <div className="mt-1 text-xs">
@@ -191,10 +224,12 @@ export function MapView({ onProfileChange }: MapViewProps) {
                     </div>
                 )}
 
-                {error && (
-                    <div className="text-sm text-red-600">
-                        Error: {error}
-                    </div>
+                        {error && (
+                            <div className="text-sm text-red-600">
+                                Error: {error}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
