@@ -5,9 +5,10 @@ type ProfileChartProps = {
     profile: ProfileResponse | null;
     onHover: (index: number | null) => void;
     onClick: (index: number) => void;
+    occlusionDistance: number | null;
 };
 
-export function ProfileChart({ profile, onHover, onClick }: ProfileChartProps) {
+export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: ProfileChartProps) {
     const [localHoveredIndex, setLocalHoveredIndex] = useState<number | null>(null);
 
     const handleHover = (index: number | null) => {
@@ -274,6 +275,84 @@ export function ProfileChart({ profile, onHover, onClick }: ProfileChartProps) {
                             </g>
                         </>
                     )}
+
+                    {/* Occlusion point marker (amber/orange) */}
+                    {occlusionDistance !== null && profile && (() => {
+                        // Find the index closest to the occlusion distance
+                        let nearestIndex = 0;
+                        let minDiff = Math.abs(distances_m[0] - occlusionDistance);
+
+                        for (let i = 1; i < distances_m.length; i++) {
+                            const diff = Math.abs(distances_m[i] - occlusionDistance);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                nearestIndex = i;
+                            }
+                        }
+
+                        const occlusionElev = elev_m[nearestIndex];
+                        if (occlusionElev === null) return null;
+
+                        return (
+                            <>
+                                {/* Vertical line at occlusion point */}
+                                <line
+                                    x1={xScale(occlusionDistance)}
+                                    y1={-padding.top}
+                                    x2={xScale(occlusionDistance)}
+                                    y2={chartHeight + padding.bottom}
+                                    stroke="#f59e0b"
+                                    strokeWidth="2"
+                                    strokeDasharray="4 2"
+                                    pointerEvents="none"
+                                />
+                                {/* Large occlusion marker */}
+                                <circle
+                                    cx={xScale(occlusionDistance)}
+                                    cy={yScale(occlusionElev)}
+                                    r={7}
+                                    fill="#f59e0b"
+                                    stroke="white"
+                                    strokeWidth="2"
+                                    pointerEvents="none"
+                                />
+                                {/* Label for occlusion point */}
+                                <g pointerEvents="none">
+                                    <rect
+                                        x={xScale(occlusionDistance) - 50}
+                                        y={yScale(occlusionElev) - 50}
+                                        width="100"
+                                        height="35"
+                                        fill="#f59e0b"
+                                        stroke="white"
+                                        strokeWidth="2"
+                                        rx="4"
+                                        opacity="0.95"
+                                    />
+                                    <text
+                                        x={xScale(occlusionDistance)}
+                                        y={yScale(occlusionElev) - 34}
+                                        textAnchor="middle"
+                                        fontSize="10"
+                                        fill="white"
+                                        fontWeight="700"
+                                    >
+                                        ⚠ OCCLUSION
+                                    </text>
+                                    <text
+                                        x={xScale(occlusionDistance)}
+                                        y={yScale(occlusionElev) - 22}
+                                        textAnchor="middle"
+                                        fontSize="11"
+                                        fill="white"
+                                        fontWeight="600"
+                                    >
+                                        {occlusionElev.toFixed(1)}m
+                                    </text>
+                                </g>
+                            </>
+                        );
+                    })()}
                 </g>
             </svg>
         </div>

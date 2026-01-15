@@ -44,7 +44,7 @@ function ensureOverlays(map: maplibregl.Map) {
             source: 'overlays',
             filter: ['==', ['geometry-type'], 'LineString'],
             paint: {
-                'line-color': '#3b82f6',
+                'line-color': ['coalesce', ['get', 'color'], '#3b82f6'],
                 'line-width': 2,
                 'line-opacity': 0.8,
             },

@@ -6,6 +6,7 @@ DSM API Server - Step 1 (FAST)
 """
 from typing import List, Optional, Tuple
 import math
+import threading
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,7 @@ app.add_middleware(
 
 # ---- Global singletons (opened once) ----
 DS = None
+DS_LOCK = threading.Lock()  # Thread-safe access to DS
 TRANSFORMER = None
 GEOD = Geod(ellps="WGS84")
 BOUNDS = None
@@ -128,12 +130,18 @@ def get_profile(req: ProfileRequest):
 
     if valid_xy:
         # ★ここが最重要：dataset.sample でバッチ取得（dataset.read(1)は禁止）
-        for out_i, v in zip(valid_idx, DS.sample(valid_xy, indexes=1)):
-            val = float(v[0])
-            if (NODATA is not None and val == float(NODATA)) or math.isnan(val):
-                elev_m[out_i] = None
-            else:
-                elev_m[out_i] = val
+        # GDAL/Rasterio LZW decoder is NOT thread-safe → use lock
+        try:
+            with DS_LOCK:
+                for out_i, v in zip(valid_idx, DS.sample(valid_xy, indexes=1)):
+                    val = float(v[0])
+                    if (NODATA is not None and val == float(NODATA)) or math.isnan(val):
+                        elev_m[out_i] = None
+                    else:
+                        elev_m[out_i] = val
+        except Exception as e:
+            print(f"[DSM] Warning: Sampling failed ({type(e).__name__}: {e}). Returning None for affected points.")
+            # Keep elev_m as None for points that failed
 
     return ProfileResponse(
         distances_m=distances_m,
