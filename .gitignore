@@ -1,0 +1,6 @@
+# Ignore generated DSM tiles and working files
+tile_DSM/
+
+# Optional: ignore node_modules and build outputs
+node_modules/
+dist/
