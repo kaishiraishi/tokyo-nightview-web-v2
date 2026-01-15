@@ -58,9 +58,10 @@ type MapViewProps = {
     profile: ProfileResponse | null;
     hoveredIndex: number | null;
     clickedIndex: number | null;
+    onZoomChange: (zoom: number) => void;
 };
 
-export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex }: MapViewProps) {
+export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
@@ -446,6 +447,26 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         }
     }, [map, currentLocation, isLoaded]);
 
+    // Track zoom level
+    useEffect(() => {
+        if (!map) return;
+
+        const updateZoom = () => {
+            onZoomChange(map.getZoom());
+        };
+
+        map.on('zoom', updateZoom);
+        map.on('move', updateZoom); // Also update on move (includes zoom) just in case
+
+        // Initial value
+        updateZoom();
+
+        return () => {
+            map.off('zoom', updateZoom);
+            map.off('move', updateZoom);
+        };
+    }, [map, onZoomChange]);
+
     return (
         <div className="relative w-full h-full">
             <div ref={containerRef} className="w-full h-full" />
@@ -593,8 +614,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.NARROW })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.NARROW
-                                                ? 'bg-blue-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-blue-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         狭 20°
@@ -602,8 +623,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.MEDIUM
-                                                ? 'bg-blue-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-blue-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         中 40°
@@ -611,8 +632,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.WIDE })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.WIDE
-                                                ? 'bg-blue-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-blue-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         広 80°
@@ -626,8 +647,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.COARSE })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.COARSE
-                                                ? 'bg-green-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-green-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         粗 9本
@@ -635,8 +656,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.MEDIUM
-                                                ? 'bg-green-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-green-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         中 13本
@@ -644,8 +665,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     <button
                                         onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.FINE })}
                                         className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.FINE
-                                                ? 'bg-green-500 text-white font-semibold'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            ? 'bg-green-500 text-white font-semibold'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                             }`}
                                     >
                                         細 17本

@@ -6,9 +6,10 @@ type ProfileChartProps = {
     onHover: (index: number | null) => void;
     onClick: (index: number) => void;
     occlusionDistance: number | null;
+    zoomLevel: number | null;
 };
 
-export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: ProfileChartProps) {
+export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoomLevel }: ProfileChartProps) {
     const [localHoveredIndex, setLocalHoveredIndex] = useState<number | null>(null);
 
     const handleHover = (index: number | null) => {
@@ -17,8 +18,11 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
     };
     if (!profile) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-gray-50">
+            <div className="w-full h-full flex items-center justify-center bg-gray-50 flex-col">
                 <p className="text-gray-500">Click on the map to select a target point</p>
+                {zoomLevel !== null && (
+                    <p className="text-gray-400 text-sm mt-2">Current Zoom: {zoomLevel.toFixed(2)}</p>
+                )}
             </div>
         );
     }
@@ -82,13 +86,20 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
 
     return (
         <div className="w-full h-full bg-white p-4">
-            <div className="mb-2">
-                <h3 className="text-lg font-semibold">Elevation Profile</h3>
-                <div className="text-sm text-gray-600">
-                    Distance: {(totalDistance / 1000).toFixed(2)} km |
-                    Max Elevation: {maxElev.toFixed(1)} m |
-                    Min Elevation: {minElev.toFixed(1)} m
+            <div className="mb-2 flex justify-between items-end">
+                <div>
+                    <h3 className="text-lg font-semibold">Elevation Profile</h3>
+                    <div className="text-sm text-gray-600">
+                        Distance: {(totalDistance / 1000).toFixed(2)} km |
+                        Max Elevation: {maxElev.toFixed(1)} m |
+                        Min Elevation: {minElev.toFixed(1)} m
+                    </div>
                 </div>
+                {zoomLevel !== null && (
+                    <div className="text-sm text-gray-500 font-mono">
+                        Zoom: {zoomLevel.toFixed(2)}
+                    </div>
+                )}
             </div>
 
             <svg

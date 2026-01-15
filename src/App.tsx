@@ -17,6 +17,7 @@ function App() {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
+    const [zoomLevel, setZoomLevel] = useState<number | null>(null);
 
     const handleProfileChange = useCallback((p: ProfileResponse | null) => {
         setProfile(p);
@@ -34,6 +35,10 @@ function App() {
         setRayResult(result);
     }, []);
 
+    const handleZoomChange = useCallback((zoom: number) => {
+        setZoomLevel(zoom);
+    }, []);
+
     return (
         <div className="w-screen h-screen flex flex-col">
             <div className="flex-1 min-h-0">
@@ -43,6 +48,7 @@ function App() {
                     profile={profile}
                     hoveredIndex={hoveredIndex}
                     clickedIndex={clickedIndex}
+                    onZoomChange={handleZoomChange}
                 />
             </div>
 
@@ -52,6 +58,7 @@ function App() {
                     onHover={handleHover}
                     onClick={handleClick}
                     occlusionDistance={rayResult?.distance || null}
+                    zoomLevel={zoomLevel}
                 />
             </div>
         </div>
