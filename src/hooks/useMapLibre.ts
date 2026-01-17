@@ -26,6 +26,38 @@ const HILLSHADE_LAYER_ID = 'terrainHillshadeLayer';
 const TERRAIN_EXAGGERATION = 1.8;
 
 // ============================================
+// VIIRS Night Light Configuration
+// ============================================
+
+const VIIRS_SOURCE_ID = 'viirs-nightlight';
+const VIIRS_LAYER_ID = 'viirs-nightlight-layer';
+
+function addVIIRSNightLight(map: maplibregl.Map) {
+    if (!map.getSource(VIIRS_SOURCE_ID)) {
+        map.addSource(VIIRS_SOURCE_ID, {
+            type: 'raster',
+            tiles: ['http://localhost:5173/viirs_heat_tiles/tiles/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            minzoom: 4,
+            maxzoom: 10,
+        });
+        console.log('[VIIRS] Source added');
+    }
+
+    if (!map.getLayer(VIIRS_LAYER_ID)) {
+        map.addLayer({
+            id: VIIRS_LAYER_ID,
+            type: 'raster',
+            source: VIIRS_SOURCE_ID,
+            paint: {
+                'raster-opacity': 0.7,
+            },
+        });
+        console.log('[VIIRS] Layer added');
+    }
+}
+
+// ============================================
 // Overlay Helpers
 // ============================================
 
@@ -184,12 +216,14 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             ensureOverlays(map);
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
+            addVIIRSNightLight(map);
             setIsLoaded(true);
         });
 
         map.on('style.load', () => {
             console.log('[Map] Style reloaded');
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
+            addVIIRSNightLight(map);
             addPlateauExtrusion(map);
         });
 

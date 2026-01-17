@@ -4,30 +4,14 @@ import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
 import { fetchProfile } from '../../lib/api/dsmApi';
-import type { LngLat, ProfileResponse } from '../../types/profile';
+import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import 'maplibre-gl/dist/maplibre-gl.css';
-
-// Ray collision result with detailed information
-type RayResult = {
-    hit: boolean;
-    distance: number | null;
-    hitPoint: LngLat | null;
-    elevation: number | null;
-    reason: 'clear' | 'building' | 'terrain';
-};
 
 // Fan-shaped scanning configuration
 type FanConfig = {
     deltaTheta: number;  // Fan angle width in degrees (e.g., 20, 40, 80)
     rayCount: number;    // Number of rays (e.g., 9, 13, 17)
     maxRange: number;    // Maximum ray distance in meters (e.g., 2000)
-};
-
-// Fan ray result extending RayResult with azimuth information
-type FanRayResult = RayResult & {
-    azimuth: number;        // Azimuth angle of this ray in degrees
-    rayIndex: number;       // Index in the fan (0 to rayCount-1)
-    maxRangePoint: LngLat;  // Endpoint at maxRange if no hit
 };
 
 // Sight angle presets (degrees)
@@ -88,61 +72,50 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
 
+    // VIIRS layer opacity state
+    const [viirsOpacity, setViirsOpacity] = useState<number>(0.7);
+
     // Ray-based occlusion detection with sight angle α
-    function findFirstOcclusion(profile: ProfileResponse, alphaDeg: number): RayResult {
-        // Constants
-        const H_EYE = 1.6; // Eye height above ground (meters)
-        const ALPHA_RAD = (alphaDeg * Math.PI) / 180; // Convert to radians
-
-        // Observer eye level: Z0 = DSM(A) + h_eye
-        const elevA = profile.elev_m[0];
-        if (elevA === null) {
-            return {
-                hit: false,
-                distance: null,
-                hitPoint: null,
-                elevation: null,
-                reason: 'clear'
-            };
-        }
-        const Z0 = elevA + H_EYE;
-
-        // Ray height function: z_ray(d) = Z0 + tan(α) * d
+    function findFirstOcclusion(
+        profile: ProfileResponse,
+        alphaDeg: number,
+        source: LngLat,
+        sourceZ0Override?: number
+    ): RayResult {
+        const H_EYE = 1.6;
+        const ALPHA_RAD = (alphaDeg * Math.PI) / 180;
         const tanAlpha = Math.tan(ALPHA_RAD);
+
+        const elevA = profile.elev_m[0];
+        const elevAValid = typeof elevA === 'number' && Number.isFinite(elevA);
+
+        // ✅ Fanでは共通Z0を使う。単発でも sourceZ0Override があれば統一できる
+        const Z0 = sourceZ0Override ?? (elevAValid ? elevA + H_EYE : H_EYE);
+
+        // ✅ 始点座標は必ず sourceLocation（profile側の先頭座標は信用しない）
+        const sourcePoint = { lng: source.lng, lat: source.lat, z: Z0 };
+
         const zRay = (d: number) => Z0 + tanAlpha * d;
 
-        // Find first collision: where DSM surface > ray height
         let prevDelta: number | null = null;
 
         for (let i = 1; i < profile.elev_m.length; i++) {
             const zi = profile.elev_m[i];
             const di = profile.distances_m[i];
 
-            // Skip null elevation points
-            if (zi === null) {
+            if (typeof zi !== 'number' || !Number.isFinite(zi)) {
                 prevDelta = null;
                 continue;
             }
 
-            // Calculate Δ_i = z_i - z_ray(d_i)
-            const zRayI = zRay(di);
-            const delta = zi - zRayI;
+            const delta = zi - zRay(di);
 
-            // Check for collision: delta > 0 means terrain is above ray
             if (delta > 0) {
-                // Collision detected!
-
-                // If we have previous point, use linear interpolation for accurate hit position
+                // hit
                 if (prevDelta !== null && prevDelta <= 0 && i > 1) {
                     const diPrev = profile.distances_m[i - 1];
-
-                    // Linear interpolation: t = (0 - Δ_{i-1}) / (Δ_i - Δ_{i-1})
                     const t = (0 - prevDelta) / (delta - prevDelta);
 
-                    // Interpolated hit distance: d_hit = d_{i-1} + t * (di - diPrev)
-                    const dHit = diPrev + t * (di - diPrev);
-
-                    // Interpolate lat/lng as well
                     const lngPrev = profile.lngs[i - 1];
                     const latPrev = profile.lats[i - 1];
                     const lngI = profile.lngs[i];
@@ -151,32 +124,42 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     const lngHit = lngPrev + t * (lngI - lngPrev);
                     const latHit = latPrev + t * (latI - latPrev);
 
-                    // Interpolate elevation at hit point
-                    const elevPrev = profile.elev_m[i - 1]!;
-                    const elevHit = elevPrev + t * (zi - elevPrev);
+                    const elevPrev = profile.elev_m[i - 1];
+                    const elevHit =
+                        (typeof elevPrev === 'number' && Number.isFinite(elevPrev))
+                            ? elevPrev + t * (zi - elevPrev)
+                            : zi;
 
-                    // Determine reason: check if elevation is significantly above ground (building)
-                    const avgGroundElev = (elevA + zi) / 2;
+                    const dHit = diPrev + t * (di - diPrev);
+
+                    const avgGroundElev = elevAValid ? (elevA! + zi) / 2 : zi;
                     const reason = elevHit > avgGroundElev + 10 ? 'building' : 'terrain';
+
+                    const hitP = { lng: lngHit, lat: latHit, z: elevHit };
 
                     return {
                         hit: true,
                         distance: dHit,
-                        hitPoint: { lng: lngHit, lat: latHit },
+                        hitPoint: hitP,
                         elevation: elevHit,
-                        reason
+                        reason,
+                        sourcePoint,
+                        rayGeometry: { start: sourcePoint, end: hitP },
                     };
                 } else {
-                    // No previous point or interpolation not possible, use current point
-                    const avgGroundElev = (elevA + zi) / 2;
+                    const avgGroundElev = elevAValid ? (elevA! + zi) / 2 : zi;
                     const reason = zi > avgGroundElev + 10 ? 'building' : 'terrain';
+
+                    const hitP = { lng: profile.lngs[i], lat: profile.lats[i], z: zi };
 
                     return {
                         hit: true,
                         distance: di,
-                        hitPoint: { lng: profile.lngs[i], lat: profile.lats[i] },
+                        hitPoint: hitP,
                         elevation: zi,
-                        reason
+                        reason,
+                        sourcePoint,
+                        rayGeometry: { start: sourcePoint, end: hitP },
                     };
                 }
             }
@@ -184,13 +167,23 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             prevDelta = delta;
         }
 
-        // No collision detected - ray is clear
+        // clear
+        const lastIdx = profile.distances_m.length - 1;
+        const totalDist = profile.distances_m[lastIdx];
+        const endP = {
+            lng: profile.lngs[lastIdx],
+            lat: profile.lats[lastIdx],
+            z: zRay(totalDist),
+        };
+
         return {
             hit: false,
             distance: null,
             hitPoint: null,
             elevation: null,
-            reason: 'clear'
+            reason: 'clear',
+            sourcePoint,
+            rayGeometry: { start: sourcePoint, end: endP },
         };
     }
 
@@ -238,31 +231,46 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         sourceLocation: LngLat,
         targetLocation: LngLat,
         fanConfig: FanConfig,
-        sightAngle: number
+        sightAngle: number,
+        sourceZ0: number
     ): Promise<FanRayResult[]> {
-        // Calculate center azimuth from source to target
         const thetaCenter = calculateAzimuth(sourceLocation, targetLocation);
-        const { deltaTheta, rayCount, maxRange } = fanConfig;
+        const { deltaTheta, rayCount } = fanConfig;
 
-        // Generate azimuth for each ray
+        // ✅ Use actual distance to target for the fan radius (removes 2000m limit)
+        const maxRange = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
+            .distanceTo(new maplibregl.LngLat(targetLocation.lng, targetLocation.lat));
+
         const rayAzimuths: number[] = [];
         for (let j = 0; j < rayCount; j++) {
             const theta_j = thetaCenter - deltaTheta / 2 + j * (deltaTheta / (rayCount - 1));
             rayAzimuths.push(theta_j);
         }
 
-        // Generate profiles for all rays in parallel
+        const tanAlpha = Math.tan((sightAngle * Math.PI) / 180);
+        const startP = { lng: sourceLocation.lng, lat: sourceLocation.lat, z: sourceZ0 };
+
         const profilePromises = rayAzimuths.map(async (azimuth, index) => {
             const endpoint = calculateEndpoint(sourceLocation, azimuth, maxRange);
+
             const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
                 .distanceTo(new maplibregl.LngLat(endpoint.lng, endpoint.lat));
 
-            // Sample count based on distance
             const sampleCount = Math.min(500, Math.max(120, Math.ceil(distance / 20)));
 
             try {
                 const profile = await fetchProfile(sourceLocation, endpoint, sampleCount);
-                const result = findFirstOcclusion(profile, sightAngle);
+
+                // ✅ 共通Z0を渡す
+                const result = findFirstOcclusion(profile, sightAngle, sourceLocation, sourceZ0);
+
+                // ✅ 念押し：始点は必ず共通Z0で統一（Fanのズレを根絶）
+                if (result.rayGeometry) {
+                    result.rayGeometry = { ...result.rayGeometry, start: startP };
+                } else {
+                    // 保険：rayGeometryが無いケースも描けるように
+                    result.rayGeometry = { start: startP, end: { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange } };
+                }
 
                 return {
                     ...result,
@@ -272,13 +280,18 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                 } as FanRayResult;
             } catch (error) {
                 console.error(`[Fan Ray ${index}] Failed to fetch profile at azimuth ${azimuth.toFixed(1)}°:`, error);
-                // Return clear result if fetch fails
+
+                // ✅ 失敗でも “描ける形” で返す（始点Z0統一）
+                const endP = { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange };
+
                 return {
                     hit: false,
                     distance: null,
                     hitPoint: null,
                     elevation: null,
                     reason: 'clear',
+                    sourcePoint: startP,
+                    rayGeometry: { start: startP, end: endP },
                     azimuth,
                     rayIndex: index,
                     maxRangePoint: endpoint,
@@ -288,7 +301,6 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
 
         const results = await Promise.all(profilePromises);
 
-        // Log summary
         const hitCount = results.filter(r => r.hit).length;
         console.log(`[Fan Scan] ${rayCount} rays, ${hitCount} blocked, ${rayCount - hitCount} clear`);
 
@@ -309,6 +321,16 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             setSourceLocation({ lng: center.lng, lat: center.lat });
         }
     }, [geoError, map, sourceLocation]);
+
+    // Update VIIRS layer opacity
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+        
+        const layer = map.getLayer('viirs-nightlight-layer');
+        if (layer) {
+            map.setPaintProperty('viirs-nightlight-layer', 'raster-opacity', viirsOpacity);
+        }
+    }, [map, isLoaded, viirsOpacity]);
 
     // Handle manual source location selection
     useEffect(() => {
@@ -363,23 +385,28 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             setError(null);
             try {
                 if (isFanMode) {
-                    // Fan mode: Generate multiple rays
-                    const results = await generateFanRays(sourceLocation, targetLocation, fanConfig, sightAngle);
-                    setFanRayResults(results);
-
-                    // Use center ray for backward compatibility with ProfileChart
-                    const centerIndex = Math.floor(fanConfig.rayCount / 2);
-                    const centerResult = results[centerIndex];
-                    setRayResult(centerResult);
-                    onRayResultChange(centerResult);
-
-                    // Still fetch the center profile for ProfileChart display
+                    // ✅ 先に中心プロファイルを取得（チャートにも使う）
                     const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
                     const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
                     const distanceM = start.distanceTo(end);
                     const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
-                    const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
-                    onProfileChange(profile);
+
+                    const centerProfile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
+                    onProfileChange(centerProfile);
+
+                    const elevA = centerProfile.elev_m[0];
+                    const sourceZ0 =
+                        (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+
+                    // ✅ 共通Z0で fan を生成（ズレなくなる）
+                    const results = await generateFanRays(sourceLocation, targetLocation, fanConfig, sightAngle, sourceZ0);
+                    setFanRayResults(results);
+
+                    // center ray
+                    const centerIndex = Math.floor(fanConfig.rayCount / 2);
+                    const centerResult = results[centerIndex];
+                    setRayResult(centerResult);
+                    onRayResultChange(centerResult);
                 } else {
                     // Single ray mode (existing logic)
                     const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
@@ -392,7 +419,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
 
                     // Calculate occlusion using ray-based detection with current sight angle
-                    const result = findFirstOcclusion(profile, sightAngle);
+                    const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
                     setRayResult(result);
 
                     // Log occlusion result for debugging
@@ -588,6 +615,27 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                             </div>
                             <div className="text-xs text-gray-500 mt-2">
                                 現在: α={sightAngle}° {rayResult?.hit && rayResult.distance && `(${rayResult.distance.toFixed(1)}m で遮蔽)`}
+                            </div>
+                        </div>
+
+                        {/* VIIRS Opacity Control */}
+                        <div className="border-t pt-3 mt-3">
+                            <div className="text-xs font-semibold text-gray-700 mb-2">
+                                VIIRSナイトライト透明度
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={viirsOpacity}
+                                    onChange={(e) => setViirsOpacity(parseFloat(e.target.value))}
+                                    className="flex-1"
+                                />
+                                <span className="text-xs text-gray-600 w-10 text-right">
+                                    {Math.round(viirsOpacity * 100)}%
+                                </span>
                             </div>
                         </div>
 

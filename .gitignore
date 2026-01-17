@@ -1,6 +1,10 @@
 # Ignore generated DSM tiles and working files
 tile_DSM/
 
+# Ignore generated VIIRS tile outputs (created by tile scripts)
+viirs_heat_tiles/
+public/viirs_heat_tiles
+
 # Optional: ignore node_modules and build outputs
 node_modules/
 dist/
