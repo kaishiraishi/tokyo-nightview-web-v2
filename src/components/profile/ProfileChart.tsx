@@ -196,9 +196,14 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
                             if (!svg) return;
 
                             const rect = svg.getBoundingClientRect();
-                            const mouseX = e.clientX - rect.left - padding.left;
 
-                            // Clamp mouseX to chart bounds
+                            // ✅ CSS px -> viewBox units conversion
+                            const scaleX = width / rect.width;
+                            const svgX = (e.clientX - rect.left) * scaleX;
+
+                            // Group coordinate system (inside translate(padding.left, padding.top))
+                            const mouseX = svgX - padding.left;
+
                             const clampedMouseX = Math.max(0, Math.min(mouseX, chartWidth));
 
                             // Find the data point whose x position is closest to the mouse X
@@ -214,9 +219,11 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
                                 }
                             }
 
-                            // Only show if elevation is valid
+                            // ✅ Clear hover when over null region
                             if (elev_m[nearestIndex] !== null) {
                                 handleHover(nearestIndex);
+                            } else {
+                                handleHover(null);
                             }
                         }}
                         onMouseLeave={() => handleHover(null)}
@@ -252,38 +259,52 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
                                 pointerEvents="none"
                             />
                             {/* Tooltip with elevation and distance */}
-                            <g pointerEvents="none">
-                                <rect
-                                    x={xScale(distances_m[localHoveredIndex]) - 40}
-                                    y={yScale(elev_m[localHoveredIndex]!) - 40}
-                                    width="80"
-                                    height="30"
-                                    fill="white"
-                                    stroke="#374151"
-                                    strokeWidth="1"
-                                    rx="4"
-                                    opacity="0.95"
-                                />
-                                <text
-                                    x={xScale(distances_m[localHoveredIndex])}
-                                    y={yScale(elev_m[localHoveredIndex]!) - 28}
-                                    textAnchor="middle"
-                                    fontSize="11"
-                                    fill="#374151"
-                                    fontWeight="600"
-                                >
-                                    {elev_m[localHoveredIndex]!.toFixed(1)}m
-                                </text>
-                                <text
-                                    x={xScale(distances_m[localHoveredIndex])}
-                                    y={yScale(elev_m[localHoveredIndex]!) - 16}
-                                    textAnchor="middle"
-                                    fontSize="9"
-                                    fill="#6b7280"
-                                >
-                                    {(distances_m[localHoveredIndex] / 1000).toFixed(2)}km
-                                </text>
-                            </g>
+                            {(() => {
+                                const hx = xScale(distances_m[localHoveredIndex]);
+                                const hy = yScale(elev_m[localHoveredIndex]!);
+
+                                const tooltipW = 80;
+                                const tooltipH = 30;
+
+                                // ✅ Clamp tooltip position to prevent cutoff at edges
+                                const tooltipX = Math.max(0, Math.min(hx - tooltipW / 2, chartWidth - tooltipW));
+                                const tooltipY = Math.max(0, Math.min(hy - 40, chartHeight - tooltipH));
+
+                                return (
+                                    <g pointerEvents="none">
+                                        <rect
+                                            x={tooltipX}
+                                            y={tooltipY}
+                                            width={tooltipW}
+                                            height={tooltipH}
+                                            fill="white"
+                                            stroke="#374151"
+                                            strokeWidth="1"
+                                            rx="4"
+                                            opacity="0.95"
+                                        />
+                                        <text
+                                            x={tooltipX + tooltipW / 2}
+                                            y={tooltipY + 12}
+                                            textAnchor="middle"
+                                            fontSize="11"
+                                            fill="#374151"
+                                            fontWeight="600"
+                                        >
+                                            {elev_m[localHoveredIndex]!.toFixed(1)}m
+                                        </text>
+                                        <text
+                                            x={tooltipX + tooltipW / 2}
+                                            y={tooltipY + 24}
+                                            textAnchor="middle"
+                                            fontSize="9"
+                                            fill="#6b7280"
+                                        >
+                                            {(distances_m[localHoveredIndex] / 1000).toFixed(2)}km
+                                        </text>
+                                    </g>
+                                );
+                            })()}
                         </>
                     )}
 

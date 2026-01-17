@@ -284,8 +284,32 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
             anchors.push({ position: [targetLocation.lng, targetLocation.lat, endZ], color: [239, 68, 68], radius: 10 });
 
             if (rayResult?.hit && rayResult.hitPoint) {
+                // ✅ Interpolate hit point Z along the ray line (same as Fan Mode)
+                const haversineMeters = (a: any, b: any) => {
+                    const R = 6371000;
+                    const toRad = (d: number) => (d * Math.PI) / 180;
+                    const dLat = toRad(b.lat - a.lat);
+                    const dLng = toRad(b.lng - a.lng);
+                    const lat1 = toRad(a.lat);
+                    const lat2 = toRad(b.lat);
+                    const h =
+                        Math.sin(dLat / 2) ** 2 +
+                        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+                    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+                };
+
+                const A = { lng: sourceLocation.lng, lat: sourceLocation.lat };
+                const B = { lng: targetLocation.lng, lat: targetLocation.lat };
+                const H = { lng: rayResult.hitPoint.lng, lat: rayResult.hitPoint.lat };
+
+                const AB = haversineMeters(A, B);
+                const AH = haversineMeters(A, H);
+                const t = AB > 0 ? Math.max(0, Math.min(1, AH / AB)) : 0;
+
+                const hitZ = startZ + t * (endZ - startZ);
+
                 hits.push({
-                    position: [rayResult.hitPoint.lng, rayResult.hitPoint.lat, rayResult.hitPoint.z ?? endZ],
+                    position: [H.lng, H.lat, hitZ + 0.2], // Slightly raised
                     color: [245, 158, 11],
                     radius: 8,
                 });

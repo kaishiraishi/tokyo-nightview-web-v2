@@ -455,14 +455,67 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         const lat = profile.lats[clickedIndex];
         const elev = profile.elev_m[clickedIndex];
 
-        if (elev === null) return;  // Skip null elevation points
+        if (elev === null) return;
 
         map.flyTo({
             center: [lng, lat],
+            zoom: 17,
             pitch: 60,
             duration: 1500,
         });
     }, [map, profile, clickedIndex]);
+
+    // Fly to target point when set (zoom: 14)
+    // Fly to target point when set (auto zoom to include source + target)
+    useEffect(() => {
+        if (!map || !isLoaded || !targetLocation) return;
+
+        // source があるなら、source + target が両方見えるように自動ズーム
+        if (sourceLocation) {
+            const bounds = new maplibregl.LngLatBounds();
+            bounds.extend([sourceLocation.lng, sourceLocation.lat]);
+            bounds.extend([targetLocation.lng, targetLocation.lat]);
+
+            // 左上パネルが被るので left を大きめに
+            const padding = { top: 80, bottom: 80, left: 420, right: 80 };
+
+            const camera = map.cameraForBounds(bounds, { padding, pitch: 60 });
+
+            if (camera && typeof camera.zoom === 'number') {
+                // 近すぎ/遠すぎを防ぐ（好みで調整）
+                const MAX_ZOOM = 16;
+                const MIN_ZOOM = 9;
+                camera.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, camera.zoom));
+            }
+
+            if (camera) {
+                map.easeTo({
+                    ...camera,
+                    pitch: 60,
+                    duration: 1200,
+                });
+            } else {
+                // 念のためのフォールバック
+                map.fitBounds(bounds, {
+                    padding,
+                    pitch: 60,
+                    duration: 1200,
+                    maxZoom: 16,
+                });
+            }
+
+            return;
+        }
+
+        // source が無い場合は従来どおり target へ
+        map.flyTo({
+            center: [targetLocation.lng, targetLocation.lat],
+            zoom: 12,
+            pitch: 60,
+            duration: 1200,
+        });
+    }, [map, isLoaded, sourceLocation, targetLocation]);
+
 
     // Center map on current location when available
     useEffect(() => {
