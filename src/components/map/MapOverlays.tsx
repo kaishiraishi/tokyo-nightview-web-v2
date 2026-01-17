@@ -58,6 +58,7 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
         const rays: any[] = [];
         const hits: any[] = [];
         const anchors: any[] = []; // ✅ Deck marker anchors
+        const rayEnds: any[] = []; // ✅ Ray endpoint visualization
 
         const terrainZ = (lng: number, lat: number): number | null => {
             const fn = (map as any).queryTerrainElevation;
@@ -139,26 +140,65 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
                 }
             }
 
-            fanRayResults.forEach((r) => {
+            fanRayResults.forEach((r, i) => {
                 if (!r.rayGeometry) return;
 
                 const endLng = r.rayGeometry.end.lng;
                 const endLat = r.rayGeometry.end.lat;
 
-                // Apply offset to End Z as well
                 const endZRaw = r.rayGeometry.end.z;
-                const endZ =
-                    (Number.isFinite(endZRaw))
-                        ? (endZRaw as number) + verticalOffset
-                        : (() => {
-                            const tz = terrainZ(endLng, endLat);
-                            return tz !== null ? tz + EPS : startZ; // Fallback
-                        })();
+                const tzEnd = terrainZ(endLng, endLat);
+
+                let endZ: number;
+                let zKind: 'raw' | 'terrain' | 'fallback';
+
+                if (r.hit) {
+                    // Occluded: Prefer DSM occlusion point (end.z), align to display system
+                    if (Number.isFinite(endZRaw)) {
+                        endZ = (endZRaw as number) + verticalOffset;
+                        zKind = 'raw';
+                    } else if (tzEnd !== null) {
+                        // Rare case where raw is missing, fall back to terrain
+                        endZ = tzEnd + EPS;
+                        zKind = 'terrain';
+                    } else {
+                        // Horizontal fallback maintained
+                        endZ = startZ;
+                        zKind = 'fallback';
+                    }
+                } else {
+                    // ✅ Range display: No occlusion → drop to terrain (don't use air end.z)
+                    if (tzEnd !== null) {
+                        endZ = tzEnd + EPS;
+                        zKind = 'terrain';
+                    } else {
+                        // Horizontal fallback maintained (ray won't disappear)
+                        endZ = startZ;
+                        zKind = 'fallback';
+                    }
+                }
 
                 rays.push({
                     source: [startLng, startLat, startZ],
                     target: [endLng, endLat, endZ],
                     color: r.hit ? [239, 68, 68] : [16, 185, 129],
+                    zKind,
+                });
+
+                // ✅ Endpoint visualization (color-coded by Z source)
+                const endColor =
+                    zKind === 'raw' ? [168, 85, 247] : // Purple: end.z available
+                        zKind === 'terrain' ? [234, 179, 8] : // Yellow: terrainZ available
+                            [107, 114, 128]; // Gray: fallback (startZ)
+
+                rayEnds.push({
+                    position: [endLng, endLat, endZ + 0.2],
+                    color: endColor,
+                    radius: zKind === 'fallback' ? 6 : 5,
+                    i,
+                    zKind,
+                    endZRaw,
+                    tz: tzEnd,
                 });
 
                 // Place orange hit point on the interpolated line
@@ -193,6 +233,39 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
                     });
                 }
             });
+
+            // ✅ Console logging for debugging
+            const counts = rayEnds.reduce((acc: any, d: any) => {
+                acc[d.zKind] = (acc[d.zKind] ?? 0) + 1;
+                return acc;
+            }, {});
+            console.log('[fan ray endZ kinds]', counts);
+
+            // First 20 rays detailed
+            console.table(rayEnds.slice(0, 20).map((d: any) => ({
+                i: d.i,
+                zKind: d.zKind,
+                endZRaw: d.endZRaw,
+                tz: d.tz,
+                lng: d.position[0],
+                lat: d.position[1],
+                endZ: d.position[2],
+            })));
+
+            // ✅ dz measurement (DSM ellipsoid height vs GSI geoid height difference)
+            const dzSamples = rayEnds.slice(0, 8).map((d: any) => {
+                const Zmap = d.tz;
+                const Zraw = d.endZRaw;
+                return {
+                    i: d.i,
+                    zKind: d.zKind,
+                    dz_map_minus_raw: (Number.isFinite(Zraw) && Zmap !== null) ? (Zmap - Zraw) : null,
+                    tz: Zmap,
+                    endZRaw: Zraw
+                };
+            });
+            console.log('[dz measurement] DSM vs GSI terrain:');
+            console.table(dzSamples);
         } else if (sourceLocation && targetLocation) {
             const tStart = terrainZ(sourceLocation.lng, sourceLocation.lat);
             const tEnd = terrainZ(targetLocation.lng, targetLocation.lat);
@@ -256,6 +329,20 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
                 stroked: true,
                 getLineColor: [255, 255, 255],
                 getLineWidth: 3,
+                parameters: { depthTest: false },
+            }),
+            // ✅ Ray endpoints (color-coded by Z source)
+            new ScatterplotLayer({
+                id: 'ray-ends-3d',
+                data: rayEnds,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: (d: any) => d.position,
+                getFillColor: (d: any) => d.color,
+                getRadius: (d: any) => d.radius ?? 5,
+                radiusUnits: 'pixels',
+                stroked: true,
+                getLineColor: [255, 255, 255],
+                getLineWidth: 1,
                 parameters: { depthTest: false },
             }),
         ];

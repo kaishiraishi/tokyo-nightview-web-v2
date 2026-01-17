@@ -325,7 +325,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
     // Update VIIRS layer opacity
     useEffect(() => {
         if (!map || !isLoaded) return;
-        
+
         const layer = map.getLayer('viirs-nightlight-layer');
         if (layer) {
             map.setPaintProperty('viirs-nightlight-layer', 'raster-opacity', viirsOpacity);
