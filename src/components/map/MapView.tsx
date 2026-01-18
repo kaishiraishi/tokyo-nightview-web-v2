@@ -5,7 +5,13 @@ import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
 import { fetchProfile } from '../../lib/api/dsmApi';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
+import { CurrentLocationButton } from '../ui/CurrentLocationButton';
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+import { ScanSettingsModal } from '../ui/ScanSettingsModal';
+import { SIGHT_ANGLE_PRESETS, FAN_PRESETS } from '../../config/scanConstants';
+
+const NORTH_THRESHOLD_DEG = 5;
 
 // Fan-shaped scanning configuration
 type FanConfig = {
@@ -15,27 +21,7 @@ type FanConfig = {
     fullScan: boolean;   // If true, scan 360° from source (no target needed)
 };
 
-// Sight angle presets (degrees)
-const SIGHT_ANGLE_PRESETS = {
-    HORIZONTAL: 0,
-    UP: 2,
-    DOWN: -2,
-} as const;
-
-// Fan scanning presets
-const FAN_PRESETS = {
-    DELTA_THETA: {
-        NARROW: 20,
-        MEDIUM: 40,
-        WIDE: 80,
-    },
-    RAY_COUNT: {
-        COARSE: 9,
-        MEDIUM: 13,
-        FINE: 17,
-    },
-    MAX_RANGE: 2000,  // Conservative start for performance
-} as const;
+type ScanStep = 'idle' | 'selecting_source' | 'selecting_target' | 'adjusting_angle' | 'scanning' | 'complete';
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
@@ -44,19 +30,35 @@ type MapViewProps = {
     hoveredIndex: number | null;
     clickedIndex: number | null;
     onZoomChange: (zoom: number) => void;
+    isSidebarOpen: boolean;
+    setIsSidebarOpen: (isOpen: boolean) => void;
 };
 
-export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange }: MapViewProps) {
+export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange, isSidebarOpen, setIsSidebarOpen }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
 
+    // Modal State
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
     const [sourceLocation, setSourceLocation] = useState<LngLat | null>(null);
     const [targetLocation, setTargetLocation] = useState<LngLat | null>(null);
-    const [isSettingSource, setIsSettingSource] = useState(false);
+    const [scanStep, setScanStep] = useState<ScanStep>('idle');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [isCollapsed, setIsCollapsed] = useState(false);
+
+    // Interactive Fan Adjustment State
+    const [previewDeltaTheta, setPreviewDeltaTheta] = useState<number | null>(null);
+
+    // Smart Location / North Reset State
+    const [mapBearing, setMapBearing] = useState<number>(0);
+    const [northResetTrigger, setNorthResetTrigger] = useState<number>(0);
+    const [isLocating, setIsLocating] = useState(false);
+    const [locateError, setLocateError] = useState<string | null>(null);
+
+    const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
+    // const [isCollapsed, setIsCollapsed] = useState(false); // Lifted to App.tsx
 
     // Sight angle state
     const [sightAngle, setSightAngle] = useState<number>(SIGHT_ANGLE_PRESETS.HORIZONTAL);
@@ -402,147 +404,173 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
     useEffect(() => {
         if (!map || !isLoaded) return;
 
-        const layer = map.getLayer('viirs-nightlight-layer');
-        if (layer) {
+        // Defensive coding: access map safely
+        const layer = map.getLayer ? map.getLayer('viirs-nightlight-layer') : null;
+
+        if (layer && map.setPaintProperty) {
             map.setPaintProperty('viirs-nightlight-layer', 'raster-opacity', viirsOpacity);
         }
     }, [map, isLoaded, viirsOpacity]);
 
-    // Handle manual source location selection
+    // Handle source location selection (Step 1)
     useEffect(() => {
-        if (!map || !isLoaded || !isSettingSource) return;
+        if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
         const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
             setSourceLocation({
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
             });
-            setIsSettingSource(false);
+            // Auto advance to next step
+            setScanStep('selecting_target');
         };
 
         map.getCanvas().style.cursor = 'crosshair';
         map.on('click', handleSourceClick);
 
         return () => {
+            // Only reset cursor if we strictly leave the selection modes, 
+            // but 'selecting_target' also needs crosshair.
+            // Simplification: just reset here, next effect picks it up.
             map.getCanvas().style.cursor = '';
             map.off('click', handleSourceClick);
         };
-    }, [map, isLoaded, isSettingSource]);
+    }, [map, isLoaded, scanStep]);
 
-    // Handle map click to set target (only when not setting source)
+    // Handle target location selection (Step 2)
     useEffect(() => {
-        if (!map || !isLoaded || isSettingSource) return;
+        if (!map || !isLoaded || scanStep !== 'selecting_target') return;
 
-        const handleClick = (e: maplibregl.MapMouseEvent) => {
+        const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
             setTargetLocation({
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
             });
+            // Auto advance to next step
+            setScanStep('adjusting_angle');
         };
 
-        map.on('click', handleClick);
+        map.getCanvas().style.cursor = 'crosshair';
+        map.on('click', handleTargetClick);
 
         return () => {
-            map.off('click', handleClick);
+            map.getCanvas().style.cursor = '';
+            map.off('click', handleTargetClick);
         };
-    }, [map, isLoaded, isSettingSource]);
+    }, [map, isLoaded, scanStep]);
 
-    // Fetch profile when source (and optionally target) locations are set
+    // Handle Angle Adjustment (Step 3) - Interactive
     useEffect(() => {
-        // For 360° scan, only source is needed
-        // For regular modes, both source and target are required
-        if (!sourceLocation) {
-            onProfileChange(null);
-            setRayResult(null);
-            setFanRayResults([]);
+        if (!map || !isLoaded || scanStep !== 'adjusting_angle' || !sourceLocation || !targetLocation) {
+            if (previewDeltaTheta !== null) setPreviewDeltaTheta(null);
             return;
         }
 
-        // Regular modes require target
-        if (!fanConfig.fullScan && !targetLocation) {
-            onProfileChange(null);
-            setRayResult(null);
-            setFanRayResults([]);
-            return;
+        // Initialize preview with current config
+        if (previewDeltaTheta === null) {
+            setPreviewDeltaTheta(fanConfig.deltaTheta);
         }
 
-        const loadProfile = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                if (isFanMode && fanConfig.fullScan) {
-                    // ✅ 360° omnidirectional scan (no target needed)
-                    // Get source elevation by querying a short profile
-                    const testEndpoint = calculateEndpoint(sourceLocation, 0, 100);
-                    const testProfile = await fetchProfile(sourceLocation, testEndpoint, 10);
-                    const elevA = testProfile.elev_m[0];
-                    const sourceZ0 =
-                        (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+        const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+            const centerAz = calculateAzimuth(sourceLocation, targetLocation);
+            const mouseAz = calculateAzimuth(sourceLocation, { lng: e.lngLat.lng, lat: e.lngLat.lat });
+            let diff = Math.abs(mouseAz - centerAz);
+            if (diff > 180) diff = 360 - diff;
 
-                    const results = await generate360Rays(sourceLocation, fanConfig, sightAngle, sourceZ0);
-                    setFanRayResults(results);
+            // Dynamic angle: 2 * diff
+            const newDelta = Math.max(1, Math.min(360, diff * 2));
+            setPreviewDeltaTheta(newDelta);
+        };
 
-                    // No single profile to show in chart for 360° mode
-                    onProfileChange(null);
-                    setRayResult(null);
-                    onRayResultChange(null);
-
-                } else if (isFanMode && targetLocation) {
-                    // ✅ Partial fan scan (requires target for center direction)
-                    const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                    const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
-                    const distanceM = start.distanceTo(end);
-                    const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
-
-                    const centerProfile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
-                    onProfileChange(centerProfile);
-
-                    const elevA = centerProfile.elev_m[0];
-                    const sourceZ0 =
-                        (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
-
-                    const results = await generateFanRays(sourceLocation, targetLocation, fanConfig, sightAngle, sourceZ0);
-                    setFanRayResults(results);
-
-                    const centerIndex = Math.floor(fanConfig.rayCount / 2);
-                    const centerResult = results[centerIndex];
-                    setRayResult(centerResult);
-                    onRayResultChange(centerResult);
-
-                } else if (targetLocation) {
-                    // Single ray mode (existing logic)
-                    const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                    const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
-                    const distanceM = start.distanceTo(end);
-
-                    const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
-
-                    const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
-
-                    const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
-                    setRayResult(result);
-
-                    if (result.hit && result.distance !== null) {
-                        console.log(`[Occlusion α=${sightAngle}°] Ray blocked at ${result.distance.toFixed(1)}m (${result.reason})`);
-                    } else {
-                        console.log(`[Occlusion α=${sightAngle}°] Clear line of sight`);
-                    }
-
-                    onRayResultChange(result);
-                    onProfileChange(profile);
-                    setFanRayResults([]);
-                }
-            } catch (err) {
-                const message = err instanceof Error ? err.message : 'Failed to load profile';
-                setError(message);
-                onProfileChange(null);
-            } finally {
-                setLoading(false);
+        const handleClick = () => {
+            if (previewDeltaTheta !== null) {
+                setFanConfig(prev => ({ ...prev, deltaTheta: previewDeltaTheta }));
+                executeScan({ deltaTheta: previewDeltaTheta }); // Pass override
             }
         };
 
-        loadProfile();
-    }, [sourceLocation, targetLocation, sightAngle, isFanMode, fanConfig, onProfileChange, onRayResultChange]);
+        map.on('mousemove', handleMouseMove);
+        map.on('click', handleClick);
+        // Using cursor: alias to indicate interactive adjustment
+        map.getCanvas().style.cursor = 'col-resize';
+
+        return () => {
+            map.off('mousemove', handleMouseMove);
+            map.off('click', handleClick);
+            map.getCanvas().style.cursor = '';
+        };
+    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig]);
+
+    // Execute Scan Logic (Manual Trigger)
+    const executeScan = async (configOverride?: Partial<FanConfig>) => {
+        if (!sourceLocation) {
+            setError("観測点が設定されていません");
+            return;
+        }
+
+        // Clear previous results
+        onProfileChange(null);
+        setRayResult(null);
+        setFanRayResults([]);
+
+        setLoading(true);
+        setError(null);
+
+        try {
+            const currentConfig = { ...fanConfig, ...configOverride };
+
+            if (isFanMode && currentConfig.fullScan) {
+                // 360° Scan
+                const testEndpoint = calculateEndpoint(sourceLocation, 0, 100);
+                const testProfile = await fetchProfile(sourceLocation, testEndpoint, 10);
+                const elevA = testProfile.elev_m[0];
+                const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+
+                const results = await generate360Rays(sourceLocation, currentConfig, sightAngle, sourceZ0);
+                setFanRayResults(results);
+            } else if (isFanMode && targetLocation) {
+                // Fan Scan
+                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
+                const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
+                const distanceM = start.distanceTo(end);
+                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
+
+                const centerProfile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
+                onProfileChange(centerProfile);
+
+                const elevA = centerProfile.elev_m[0];
+                const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+
+                const results = await generateFanRays(sourceLocation, targetLocation, currentConfig, sightAngle, sourceZ0);
+                setFanRayResults(results);
+
+                const centerIndex = Math.floor(currentConfig.rayCount / 2);
+                const centerResult = results[centerIndex];
+                setRayResult(centerResult);
+                onRayResultChange(centerResult);
+            } else if (targetLocation) {
+                // Single Ray
+                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
+                const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
+                const distanceM = start.distanceTo(end);
+                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
+
+                const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
+                const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
+                setRayResult(result);
+                onRayResultChange(result);
+                onProfileChange(profile);
+            }
+
+            // Mark complete
+            setScanStep('scanning'); // or 'complete'
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to execute scan';
+            setError(message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // Fly to clicked point on profile chart
     useEffect(() => {
@@ -553,6 +581,9 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         const elev = profile.elev_m[clickedIndex];
 
         if (elev === null) return;
+
+        // Safety check: Ensure coordinates are valid before flying
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
 
         map.flyTo({
             center: [lng, lat],
@@ -642,7 +673,89 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             map.off('zoom', updateZoom);
             map.off('move', updateZoom);
         };
+        return () => {
+            map.off('zoom', updateZoom);
+            map.off('move', updateZoom);
+        };
     }, [map, onZoomChange]);
+
+    // Track map rotation (Bearing)
+    useEffect(() => {
+        if (!map) return;
+
+        const updateBearing = () => {
+            // map.getBearing() returns -180 to 180 (usually)
+            setMapBearing(map.getBearing());
+        };
+
+        map.on('rotate', updateBearing);
+        map.on('move', updateBearing); // move includes rotation often
+
+        updateBearing(); // initial
+
+        return () => {
+            map.off('rotate', updateBearing);
+            map.off('move', updateBearing);
+        };
+    }, [map]);
+
+    // Effect: Handle North Reset Trigger
+    useEffect(() => {
+        if (!map || northResetTrigger === 0) return;
+
+        map.flyTo({
+            bearing: 0,
+            pitch: 0,
+            duration: 600,
+            easing: (t) => t * (2 - t), // easeOutQuad
+        });
+    }, [map, northResetTrigger]);
+
+
+    // Handler: Reset or Locate
+    const handleResetLocate = () => {
+        if (!map) return;
+
+        // 1. If not North Up -> Reset to North
+        if (!isNorthUp) {
+            setNorthResetTrigger(Date.now());
+            return;
+        }
+
+        // 2. If North Up -> Current Location
+        if (isLocating) return; // Prevent double click
+        setIsLocating(true);
+        setLocateError(null);
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const { longitude, latitude } = pos.coords;
+                // Fly to location
+                map.flyTo({
+                    center: [longitude, latitude],
+                    zoom: 16,
+                    duration: 1200,
+                    essential: true
+                });
+
+                // Note: The useGeolocation hook will likely pick this up if watching, 
+                // but we might want to manually update source if currently setting source?
+                // For now, adhering to spec: "currentLocation changed -> flyTo". 
+                // But we are doing explicit flyTo here on success to be snappy.
+                // Does useGeolocation hook update `currentLocation`? Yes it does watches.
+
+                setIsLocating(false);
+            },
+            (err) => {
+                console.error("Geolocation failed", err);
+                setLocateError(err.message);
+                setIsLocating(false);
+                // Ideally show toast here, for now relying on UI error state if any, or console
+                alert(`位置情報の取得に失敗しました: ${err.message}`);
+            },
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+    };
 
     return (
         <div className="relative w-full h-full">
@@ -658,290 +771,206 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                 hoveredIndex={hoveredIndex}
                 isFanMode={isFanMode}
                 fanRayResults={fanRayResults}
+                previewFanConfig={(scanStep === 'adjusting_angle' && previewDeltaTheta !== null)
+                    ? { deltaTheta: previewDeltaTheta, rayCount: fanConfig.rayCount }
+                    : null
+                }
             />
 
-            {/* Status overlay (Glassmorphism) */}
-            {/* Status overlay (Glassmorphism) - Full Height Sidebar */}
-            <div className={`absolute top-0 left-0 bottom-0 w-80 bg-black/60 backdrop-blur-md border-r border-white/10 shadow-lg p-4 text-gray-100 transition-transform duration-300 ease-in-out flex flex-col overflow-y-auto ${isCollapsed ? '-translate-x-full' : 'translate-x-0'}`}>
-                <div className="flex items-center justify-between shrink-0 mb-4">
-                    <h2 className="text-lg font-semibold text-white">Tokyo Nightview</h2>
+            {/* Sidebar toggle button (Always visible when collapsed) */}
+            {!isSidebarOpen && (
+                <button
+                    aria-label="Expand panel"
+                    onClick={() => setIsSidebarOpen(true)}
+                    className="absolute top-4 left-4 z-50 p-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-lg text-white shadow-lg hover:bg-black/80 transition-all"
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+            )}
+
+            {/* Sidebar Overlay */}
+            <div
+                className={`absolute top-0 left-0 h-full w-80 bg-black/80 backdrop-blur-md border-r border-white/10 transition-transform duration-300 z-10 p-4 overflow-y-auto ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                    }`}
+            >
+                {/* Header */}
+                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                    <h1 className="text-lg font-bold text-white tracking-wider flex items-center gap-2">
+                        <span className="text-xl">🌃</span> Tokyo Nightview
+                    </h1>
                     <button
-                        aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-                        onClick={() => setIsCollapsed((s) => !s)}
-                        className="text-sm bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 transition-colors"
+                        onClick={() => setIsSidebarOpen(false)}
+                        className="p-1 hover:bg-white/10 rounded-full transition-colors"
                     >
-                        ◀
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                     </button>
-                    {/* Collapsed toggle button floating outside is needed if we hide the whole panel */}
                 </div>
 
-                {/* External Toggle Button when collapsed (Manual addition needed outside this div if using -translate-x-full) */}
-                {/* For now, we keep the button inside, but if hidden, user can't bring it back. 
-                    So we'll changing the collapse behavior:
-                    Instead of hiding the whole div, we might just shrink it or have a separate fixed toggle button.
-                    Let's adjust the className above to handle collapse better or add a separate button.
-                    Actually, if I translate-x-full, it's gone. 
-                    I should add a separate button outside for re-opening. 
-                */}
+                {geoError && (
+                    <div className="text-amber-400 text-sm mb-2 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
+                        <div className="font-semibold">📍 位置情報が利用できません</div>
+                        <div className="mt-1 text-xs text-amber-200">
+                            {geoError.includes('denied') || geoError.includes('permission') ? (
+                                <>
+                                    ブラウザの設定で位置情報を許可してください。<br />
+                                    または地図中心を基準点として使用します。
+                                </>
+                            ) : (
+                                <>位置情報エラー: {geoError}</>
+                            )}
+                        </div>
+                    </div>
+                )}
 
-                {!isCollapsed && (
-                    <>
-                        {geoError && (
-                            <div className="text-amber-400 text-sm mb-2 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
-                                <div className="font-semibold">📍 位置情報が利用できません</div>
-                                <div className="mt-1 text-xs text-amber-200">
-                                    {geoError.includes('denied') || geoError.includes('permission') ? (
-                                        <>
-                                            ブラウザの設定で位置情報を許可してください。<br />
-                                            または地図中心を基準点として使用します。
-                                        </>
-                                    ) : (
-                                        <>位置情報エラー: {geoError}</>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {sourceLocation && (
-                            <div className="text-sm text-gray-200 mb-2">
-                                📍 基準点: {sourceLocation.lat.toFixed(5)}, {sourceLocation.lng.toFixed(5)}
-                                {currentLocation && sourceLocation === currentLocation && (
-                                    <span className="text-xs text-green-400 ml-1">(現在地)</span>
-                                )}
-                            </div>
-                        )}
-
-                        {targetLocation && (
-                            <div className="text-sm text-gray-200 mb-2">
-                                🧭 向き指定点: {targetLocation.lat.toFixed(5)}, {targetLocation.lng.toFixed(5)}
-                                <div className="text-xs text-gray-400 mt-1">
-                                    ※ この点は視線の方向を指定するためのものです
-                                </div>
-                            </div>
-                        )}
-
-                        {!targetLocation && (
-                            <div className="text-sm text-gray-400 mb-2">
-                                {isSettingSource ? (
-                                    <span className="text-blue-400 font-semibold">地図をクリックして基準点を設定</span>
-                                ) : (
-                                    '地図をクリックして視線の向きを指定'
-                                )}
-                            </div>
-                        )}
-
-                        <div className="flex gap-2 mb-2">
+                {/* Workflow Status / Wizard UI */}
+                <div className="mb-4 space-y-2">
+                    <div className="flex justify-between items-center bg-white/10 p-2 rounded">
+                        <span className={`text-xs font-bold ${scanStep === 'idle' ? 'text-gray-400' : 'text-blue-400'}`}>
+                            Step: {scanStep.replace('_', ' ').toUpperCase()}
+                        </span>
+                        {scanStep !== 'idle' && (
                             <button
-                                onClick={() => setIsSettingSource(true)}
-                                disabled={isSettingSource}
-                                className="text-xs bg-blue-600/80 text-white px-3 py-1 rounded hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors"
+                                onClick={() => {
+                                    setScanStep('idle');
+                                    setSourceLocation(null);
+                                    setTargetLocation(null);
+                                    setFanRayResults([]);
+                                }}
+                                className="text-xs text-red-400 hover:text-red-300 underline"
                             >
-                                基準点を手動設定
+                                Reset
+                            </button>
+                        )}
+                    </div>
+
+                    {scanStep === 'idle' && (
+                        <button
+                            onClick={() => {
+                                setScanStep('selecting_source');
+                                setIsSidebarOpen(true);
+                                setFanConfig(prev => ({ ...prev, fullScan: false }));
+                            }}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow-lg text-sm transition-all"
+                        >
+                            📡 新規スキャン開始
+                        </button>
+                    )}
+
+                    {scanStep === 'selecting_source' && (
+                        <div className="p-3 bg-blue-900/40 border border-blue-500/30 rounded text-sm text-blue-200 animate-pulse">
+                            📍 地図をクリックして <b>観測点(Source)</b> を決定してください
+                        </div>
+                    )}
+
+                    {scanStep === 'selecting_target' && (
+                        <div className="p-3 bg-green-900/40 border border-green-500/30 rounded text-sm text-green-200 animate-pulse">
+                            🎯 地図をクリックして <b>目標点(Target)</b> を決定してください
+                        </div>
+                    )}
+
+                    {scanStep === 'adjusting_angle' && (
+                        <div className="space-y-2">
+                            <div className="p-2 bg-purple-900/40 border border-purple-500/30 rounded text-xs text-purple-200">
+                                📐 扇形の角度・範囲を調整し、実行してください
+                            </div>
+                            <button
+                                onClick={() => executeScan()}
+                                className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow-lg text-sm transition-all"
+                            >
+                                ▶ スキャン実行
                             </button>
                         </div>
+                    )}
+                </div>
 
-                        {/* Sight Angle Selector */}
-                        <div className="border-t border-white/10 pt-3 mt-3">
-                            <div className="text-xs font-semibold text-gray-300 mb-2">
-                                視線角度 (α)
-                            </div>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.DOWN)}
-                                    className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.DOWN
-                                        ? 'bg-orange-600 text-white font-semibold shadow-[0_0_10px_rgba(234,88,12,0.4)]'
-                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
-                                        }`}
-                                >
-                                    下向き -2°
-                                </button>
-                                <button
-                                    onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.HORIZONTAL)}
-                                    className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.HORIZONTAL
-                                        ? 'bg-blue-600 text-white font-semibold shadow-[0_0_10px_rgba(37,99,235,0.4)]'
-                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
-                                        }`}
-                                >
-                                    水平 0°
-                                </button>
-                                <button
-                                    onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.UP)}
-                                    className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.UP
-                                        ? 'bg-green-600 text-white font-semibold shadow-[0_0_10px_rgba(22,163,74,0.4)]'
-                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
-                                        }`}
-                                >
-                                    上向き +2°
-                                </button>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-2">
-                                現在: α={sightAngle}° {rayResult?.hit && rayResult.distance && `(${rayResult.distance.toFixed(1)}m で遮蔽)`}
-                            </div>
-                        </div>
-
-                        {/* VIIRS Opacity Control */}
-                        <div className="border-t border-white/10 pt-3 mt-3">
-                            <div className="text-xs font-semibold text-gray-300 mb-2">
-                                VIIRSナイトライト透明度
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="1"
-                                    step="0.05"
-                                    value={viirsOpacity}
-                                    onChange={(e) => setViirsOpacity(parseFloat(e.target.value))}
-                                    className="flex-1 accent-blue-500"
-                                />
-                                <span className="text-xs text-gray-400 w-10 text-right">
-                                    {Math.round(viirsOpacity * 100)}%
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Scan Settings */}
-                        <div className="border-t border-white/10 pt-4 mt-4">
-                            <div className="text-sm font-semibold text-gray-200 mb-3">スキャン設定</div>
-
-                            {/* Mode Selector */}
-                            <div className="flex bg-black/40 rounded-lg p-1 mb-4">
-                                <button
-                                    onClick={() => setFanConfig({ ...fanConfig, fullScan: true, rayCount: 36 })}
-                                    className={`flex-1 text-xs py-1.5 rounded-md transition-all ${fanConfig.fullScan
-                                        ? 'bg-purple-600 text-white font-semibold shadow-sm'
-                                        : 'text-gray-400 hover:text-gray-200'
-                                        }`}
-                                >
-                                    360° 全方位
-                                </button>
-                                <button
-                                    onClick={() => setFanConfig({ ...fanConfig, fullScan: false, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
-                                    className={`flex-1 text-xs py-1.5 rounded-md transition-all ${!fanConfig.fullScan
-                                        ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                                        : 'text-gray-400 hover:text-gray-200'
-                                        }`}
-                                >
-                                    扇形 (Sector)
-                                </button>
-                            </div>
-
-                            {/* 360° Controls */}
-                            {fanConfig.fullScan && (
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="text-xs font-semibold text-gray-300 mb-2">レイ本数 (精度)</div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 36 })}
-                                                className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === 36 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                                                    }`}
-                                            >
-                                                36本 (10°毎)
-                                            </button>
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 72 })}
-                                                className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === 72 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                                                    }`}
-                                            >
-                                                72本 (5°毎)
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <div className="flex justify-between text-xs font-semibold text-gray-300 mb-2">
-                                            <span>最大距離</span>
-                                            <span>{fanConfig.maxRange}m</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="500"
-                                            max="10000"
-                                            step="500"
-                                            value={fanConfig.maxRange}
-                                            onChange={(e) => setFanConfig({ ...fanConfig, maxRange: parseInt(e.target.value) })}
-                                            className="w-full accent-purple-500"
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Sector Controls */}
-                            {!fanConfig.fullScan && (
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="text-xs font-semibold text-gray-300 mb-2">扇形幅 (Δθ)</div>
-                                        <div className="flex gap-2">
-                                            {[
-                                                { label: '狭 20°', val: FAN_PRESETS.DELTA_THETA.NARROW },
-                                                { label: '中 40°', val: FAN_PRESETS.DELTA_THETA.MEDIUM },
-                                                { label: '広 80°', val: FAN_PRESETS.DELTA_THETA.WIDE },
-                                            ].map((opt) => (
-                                                <button
-                                                    key={opt.val}
-                                                    onClick={() => setFanConfig({ ...fanConfig, deltaTheta: opt.val })}
-                                                    className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.deltaTheta === opt.val ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                                                        }`}
-                                                >
-                                                    {opt.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs font-semibold text-gray-300 mb-2">レイ本数</div>
-                                        <div className="flex gap-2">
-                                            {[
-                                                { label: '粗 9本', val: FAN_PRESETS.RAY_COUNT.COARSE },
-                                                { label: '中 13本', val: FAN_PRESETS.RAY_COUNT.MEDIUM },
-                                                { label: '細 17本', val: FAN_PRESETS.RAY_COUNT.FINE },
-                                            ].map((opt) => (
-                                                <button
-                                                    key={opt.val}
-                                                    onClick={() => setFanConfig({ ...fanConfig, rayCount: opt.val })}
-                                                    className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === opt.val ? 'bg-green-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                                                        }`}
-                                                >
-                                                    {opt.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Status Info */}
-                        <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
-                            <div className="text-xs text-gray-300 space-y-1">
-                                {loading ? (
-                                    <div className="text-blue-400 animate-pulse">Scanning terrain...</div>
-                                ) : error ? (
-                                    <div className="text-red-400">Error: {error}</div>
-                                ) : fanRayResults.length > 0 ? (
-                                    <>
-                                        <div className="flex justify-between">
-                                            <span>総レイ数:</span>
-                                            <span className="font-mono">{fanRayResults.length}</span>
-                                        </div>
-                                        <div className="flex justify-between text-red-300">
-                                            <span>遮蔽 (Blocked):</span>
-                                            <span className="font-mono">{fanRayResults.filter(r => r.hit).length}</span>
-                                        </div>
-                                        <div className="flex justify-between text-green-300">
-                                            <span>通過 (Clear):</span>
-                                            <span className="font-mono">{fanRayResults.filter(r => !r.hit).length}</span>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="text-gray-500 italic text-center">Ready to scan</div>
-                                )}
-                            </div>
-                        </div>
-                    </>
+                {sourceLocation && (
+                    <div className="text-sm text-gray-200 mb-2">
+                        {/* Status text removed as per request */}
+                    </div>
                 )}
+
+                {targetLocation && (
+                    <div className="text-sm text-gray-200 mb-2">
+                        {/* Status text removed as per request */}
+                    </div>
+                )}
+
+
+                {/* Status Info */}
+                <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
+                    <div className="text-xs text-gray-300 space-y-1">
+                        {loading ? (
+                            <div className="text-blue-400 animate-pulse">Scanning terrain...</div>
+                        ) : error ? (
+                            <div className="text-red-400">Error: {error}</div>
+                        ) : fanRayResults.length > 0 ? (
+                            <>
+                                <div className="flex justify-between">
+                                    <span>総レイ数:</span>
+                                    <span className="font-mono">{fanRayResults.length}</span>
+                                </div>
+                                <div className="flex justify-between text-red-300">
+                                    <span>遮蔽 (Blocked):</span>
+                                    <span className="font-mono">{fanRayResults.filter(r => r.hit).length}</span>
+                                </div>
+                                <div className="flex justify-between text-green-300">
+                                    <span>通過 (Clear):</span>
+                                    <span className="font-mono">{fanRayResults.filter(r => !r.hit).length}</span>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="text-gray-500 italic text-center">Ready to scan</div>
+                        )}
+                    </div>
+                </div>
             </div>
+
+            {/* Current Location Button & Settings Button */}
+            <div className="absolute bottom-6 right-6 flex gap-4 md:bottom-8 md:right-8 z-50 pointer-events-auto">
+                {/* Settings Button */}
+                <button
+                    onClick={() => {
+                        console.log('Settings clicked');
+                        setIsSettingsOpen(true);
+                    }}
+                    className="group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-lg shadow-lg p-3 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center cursor-pointer"
+                    aria-label="スキャン設定"
+                >
+                    <span className="text-xl">⚙️</span>
+                </button>
+
+                <CurrentLocationButton
+                    onClick={() => {
+                        console.log('Location clicked');
+                        handleResetLocate();
+                    }}
+                    isNorthUp={isNorthUp}
+                    disabled={isLocating}
+                    className="relative bottom-auto right-auto border-none shadow-none cursor-pointer"
+                />
+            </div>
+            {locateError && (
+                <div className="absolute bottom-24 right-6 md:right-8 bg-red-900/80 text-white text-xs px-2 py-1 rounded backdrop-blur border border-red-500/30 z-20">
+                    {locateError}
+                </div>
+            )}
+
+            {/* Settings Modal */}
+            <ScanSettingsModal
+                isOpen={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
+                sightAngle={sightAngle}
+                setSightAngle={setSightAngle}
+                viirsOpacity={viirsOpacity}
+                setViirsOpacity={setViirsOpacity}
+                fanConfig={fanConfig}
+                setFanConfig={setFanConfig}
+                rayResult={rayResult}
+            />
         </div>
     );
 }

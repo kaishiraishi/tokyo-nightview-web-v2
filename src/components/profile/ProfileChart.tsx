@@ -11,6 +11,7 @@ type ProfileChartProps = {
 
 export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoomLevel }: ProfileChartProps) {
     const [localHoveredIndex, setLocalHoveredIndex] = useState<number | null>(null);
+    const [isCollapsed, setIsCollapsed] = useState(false);
 
     const handleHover = (index: number | null) => {
         setLocalHoveredIndex(index);
@@ -18,11 +19,17 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
     };
     if (!profile) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg flex-col transition-all duration-300">
-                <p className="text-gray-300 font-medium">地図をクリックしてターゲット地点を選択してください</p>
-                {zoomLevel !== null && (
-                    <p className="text-gray-500 text-sm mt-2">Current Zoom: {zoomLevel.toFixed(2)}</p>
-                )}
+            <div className={`w-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg flex flex-col transition-all duration-300 ${isCollapsed ? 'h-12' : 'h-full'}`}>
+                {/* Header for collapsed state */}
+                <div className="flex items-center justify-between p-3 h-12">
+                    <p className="text-gray-300 font-medium text-sm">地図をクリックしてターゲット地点を選択</p>
+                    <button
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="text-white/70 hover:text-white transition-colors p-1"
+                    >
+                        {isCollapsed ? '▲' : '▼'}
+                    </button>
+                </div>
             </div>
         );
     }
@@ -34,8 +41,16 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
 
     if (validElevations.length === 0) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg">
-                <p className="text-red-400 font-semibold">このルートには標高データがありません</p>
+            <div className={`w-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg transition-all duration-300 flex flex-col ${isCollapsed ? 'h-12' : 'h-full'}`}>
+                <div className="flex items-center justify-between p-3 h-12">
+                    <p className="text-red-400 font-semibold text-sm">データなし</p>
+                    <button
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="text-white/70 hover:text-white transition-colors p-1"
+                    >
+                        {isCollapsed ? '▲' : '▼'}
+                    </button>
+                </div>
             </div>
         );
     }
@@ -85,20 +100,31 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
     }
 
     return (
-        <div className="w-full h-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-4 transition-all duration-300 flex flex-col">
-            <div className="mb-2 flex justify-between items-end shrink-0">
+        <div className={`w-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-4 transition-all duration-300 flex flex-col ${isCollapsed ? 'h-14 overflow-hidden' : 'h-full'}`}>
+            <div className="mb-2 flex justify-between items-start shrink-0">
                 <div>
-                    <h3 className="text-lg font-semibold text-white">地形断面図</h3>
-                    <div className="text-sm text-gray-300">
-                        距離: {(totalDistance / 1000).toFixed(2)} km |
-                        標高: <span className="text-blue-300">{minElev.toFixed(1)}m</span> - <span className="text-red-300">{maxElev.toFixed(1)}m</span>
-                    </div>
+                    <h3 className="text-lg font-semibold text-white leading-tight">地形断面図</h3>
+                    {!isCollapsed && (
+                        <div className="text-sm text-gray-300 mt-1">
+                            距離: {(totalDistance / 1000).toFixed(2)} km |
+                            標高: <span className="text-blue-300">{minElev.toFixed(1)}m</span> - <span className="text-red-300">{maxElev.toFixed(1)}m</span>
+                        </div>
+                    )}
                 </div>
-                {zoomLevel !== null && (
-                    <div className="text-sm text-gray-500 font-mono">
-                        Zoom: {zoomLevel.toFixed(2)}
-                    </div>
-                )}
+
+                <div className="flex items-center gap-4">
+                    {zoomLevel !== null && !isCollapsed && (
+                        <div className="text-sm text-gray-500 font-mono">
+                            Zoom: {zoomLevel.toFixed(2)}
+                        </div>
+                    )}
+                    <button
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="text-white/70 hover:text-white transition-colors self-start p-1 bg-white/5 rounded hover:bg-white/10"
+                    >
+                        {isCollapsed ? '▲ 展開' : '▼ 最小化'}
+                    </button>
+                </div>
             </div>
 
             <div className="flex-1 min-h-0 relative">

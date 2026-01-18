@@ -212,6 +212,9 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
         map.scrollZoom?.enable?.();
 
         map.on('load', () => {
+            // Prevent race condition: if this map was already cleaned up (removed), ignore the load event
+            if (mapRef.current !== map) return;
+
             console.log('[Map] Loaded');
             ensureOverlays(map);
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);

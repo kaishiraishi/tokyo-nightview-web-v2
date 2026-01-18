@@ -18,9 +18,11 @@ function App() {
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
     const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
     const handleProfileChange = useCallback((p: ProfileResponse | null) => {
         setProfile(p);
+        setClickedIndex(null); // Reset clicked index when profile changes (prevents stale index crashes)
     }, []);
 
     const handleHover = useCallback((index: number | null) => {
@@ -50,13 +52,18 @@ function App() {
                     hoveredIndex={hoveredIndex}
                     clickedIndex={clickedIndex}
                     onZoomChange={handleZoomChange}
+                    isSidebarOpen={isSidebarOpen}
+                    setIsSidebarOpen={setIsSidebarOpen}
                 />
             </div>
 
             {/* Floating Profile Overlay */}
-            {/* Positioned at bottom center with some margin */}
-            <div className="absolute bottom-6 left-4 right-4 h-64 z-20 pointer-events-none flex justify-center">
-                <div className="w-full max-w-5xl pointer-events-auto h-full">
+            {/* Positioned at bottom center with dynamic margin based on sidebar */}
+            <div
+                className={`absolute bottom-6 right-4 h-64 z-20 pointer-events-none flex justify-center transition-all duration-300 ease-in-out`}
+                style={{ left: isSidebarOpen ? '21rem' : '1rem' }} // 20rem (Sidebar) + 1rem (Gap) vs 1rem
+            >
+                <div className="w-full h-full pointer-events-auto max-w-6xl">
                     <ProfileChart
                         profile={profile}
                         onHover={handleHover}
