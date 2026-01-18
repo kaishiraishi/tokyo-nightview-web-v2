@@ -12,6 +12,7 @@ type FanConfig = {
     deltaTheta: number;  // Fan angle width in degrees (e.g., 20, 40, 80)
     rayCount: number;    // Number of rays (e.g., 9, 13, 17)
     maxRange: number;    // Maximum ray distance in meters (e.g., 2000)
+    fullScan: boolean;   // If true, scan 360° from source (no target needed)
 };
 
 // Sight angle presets (degrees)
@@ -69,6 +70,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
         rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM,
         maxRange: FAN_PRESETS.MAX_RANGE,
+        fullScan: false,
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
 
@@ -307,6 +309,80 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         return results;
     }
 
+    // Generate 360° omnidirectional rays (no target needed)
+    async function generate360Rays(
+        sourceLocation: LngLat,
+        fanConfig: FanConfig,
+        sightAngle: number,
+        sourceZ0: number
+    ): Promise<FanRayResult[]> {
+        const { rayCount, maxRange } = fanConfig;
+
+        // Generate evenly spaced azimuths from 0° to 360°
+        const rayAzimuths: number[] = [];
+        for (let j = 0; j < rayCount; j++) {
+            const theta_j = (j * 360) / rayCount;
+            rayAzimuths.push(theta_j);
+        }
+
+        const tanAlpha = Math.tan((sightAngle * Math.PI) / 180);
+        const startP = { lng: sourceLocation.lng, lat: sourceLocation.lat, z: sourceZ0 };
+
+        console.log(`[360° Scan] Starting with ${rayCount} rays, maxRange=${maxRange}m`);
+
+        const profilePromises = rayAzimuths.map(async (azimuth, index) => {
+            const endpoint = calculateEndpoint(sourceLocation, azimuth, maxRange);
+
+            const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
+                .distanceTo(new maplibregl.LngLat(endpoint.lng, endpoint.lat));
+
+            const sampleCount = Math.min(500, Math.max(120, Math.ceil(distance / 20)));
+
+            try {
+                const profile = await fetchProfile(sourceLocation, endpoint, sampleCount);
+
+                const result = findFirstOcclusion(profile, sightAngle, sourceLocation, sourceZ0);
+
+                if (result.rayGeometry) {
+                    result.rayGeometry = { ...result.rayGeometry, start: startP };
+                } else {
+                    result.rayGeometry = { start: startP, end: { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange } };
+                }
+
+                return {
+                    ...result,
+                    azimuth,
+                    rayIndex: index,
+                    maxRangePoint: endpoint,
+                } as FanRayResult;
+            } catch (error) {
+                console.error(`[360° Ray ${index}] Failed at azimuth ${azimuth.toFixed(1)}°:`, error);
+
+                const endP = { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange };
+
+                return {
+                    hit: false,
+                    distance: null,
+                    hitPoint: null,
+                    elevation: null,
+                    reason: 'clear',
+                    sourcePoint: startP,
+                    rayGeometry: { start: startP, end: endP },
+                    azimuth,
+                    rayIndex: index,
+                    maxRangePoint: endpoint,
+                } as FanRayResult;
+            }
+        });
+
+        const results = await Promise.all(profilePromises);
+
+        const hitCount = results.filter(r => r.hit).length;
+        console.log(`[360° Scan] Complete: ${hitCount} blocked, ${rayCount - hitCount} clear`);
+
+        return results;
+    }
+
     // Auto-set source location from geolocation when available
     useEffect(() => {
         if (currentLocation) {
@@ -371,9 +447,19 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         };
     }, [map, isLoaded, isSettingSource]);
 
-    // Fetch profile when both source and target locations are set
+    // Fetch profile when source (and optionally target) locations are set
     useEffect(() => {
-        if (!sourceLocation || !targetLocation) {
+        // For 360° scan, only source is needed
+        // For regular modes, both source and target are required
+        if (!sourceLocation) {
+            onProfileChange(null);
+            setRayResult(null);
+            setFanRayResults([]);
+            return;
+        }
+
+        // Regular modes require target
+        if (!fanConfig.fullScan && !targetLocation) {
             onProfileChange(null);
             setRayResult(null);
             setFanRayResults([]);
@@ -384,8 +470,25 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             setLoading(true);
             setError(null);
             try {
-                if (isFanMode) {
-                    // ✅ 先に中心プロファイルを取得（チャートにも使う）
+                if (isFanMode && fanConfig.fullScan) {
+                    // ✅ 360° omnidirectional scan (no target needed)
+                    // Get source elevation by querying a short profile
+                    const testEndpoint = calculateEndpoint(sourceLocation, 0, 100);
+                    const testProfile = await fetchProfile(sourceLocation, testEndpoint, 10);
+                    const elevA = testProfile.elev_m[0];
+                    const sourceZ0 =
+                        (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+
+                    const results = await generate360Rays(sourceLocation, fanConfig, sightAngle, sourceZ0);
+                    setFanRayResults(results);
+
+                    // No single profile to show in chart for 360° mode
+                    onProfileChange(null);
+                    setRayResult(null);
+                    onRayResultChange(null);
+
+                } else if (isFanMode && targetLocation) {
+                    // ✅ Partial fan scan (requires target for center direction)
                     const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
                     const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
                     const distanceM = start.distanceTo(end);
@@ -398,42 +501,36 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     const sourceZ0 =
                         (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
 
-                    // ✅ 共通Z0で fan を生成（ズレなくなる）
                     const results = await generateFanRays(sourceLocation, targetLocation, fanConfig, sightAngle, sourceZ0);
                     setFanRayResults(results);
 
-                    // center ray
                     const centerIndex = Math.floor(fanConfig.rayCount / 2);
                     const centerResult = results[centerIndex];
                     setRayResult(centerResult);
                     onRayResultChange(centerResult);
-                } else {
+
+                } else if (targetLocation) {
                     // Single ray mode (existing logic)
                     const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
                     const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
                     const distanceM = start.distanceTo(end);
 
-                    // 10m間隔でサンプリング（最低120点、最大500点に制限）
                     const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
 
                     const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
 
-                    // Calculate occlusion using ray-based detection with current sight angle
                     const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
                     setRayResult(result);
 
-                    // Log occlusion result for debugging
                     if (result.hit && result.distance !== null) {
                         console.log(`[Occlusion α=${sightAngle}°] Ray blocked at ${result.distance.toFixed(1)}m (${result.reason})`);
                     } else {
                         console.log(`[Occlusion α=${sightAngle}°] Clear line of sight`);
                     }
 
-                    // Notify parent of ray result
                     onRayResultChange(result);
-
                     onProfileChange(profile);
-                    setFanRayResults([]); // Clear fan results in single mode
+                    setFanRayResults([]);
                 }
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Failed to load profile';
@@ -708,93 +805,161 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                         {/* Fan Controls (only when fan mode is active) */}
                         {isFanMode && (
                             <div className="border-t pt-3 mt-3">
-                                <div className="text-xs font-semibold text-gray-700 mb-2">
-                                    扇形幅 (Δθ)
-                                </div>
-                                <div className="flex gap-2 mb-3">
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.NARROW })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.NARROW
-                                            ? 'bg-blue-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        狭 20°
-                                    </button>
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.MEDIUM
-                                            ? 'bg-blue-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        中 40°
-                                    </button>
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.WIDE })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.WIDE
-                                            ? 'bg-blue-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        広 80°
-                                    </button>
-                                </div>
+                                {/* 360° Scan Toggle */}
+                                <label className="flex items-center gap-2 text-sm cursor-pointer mb-3">
+                                    <input
+                                        type="checkbox"
+                                        checked={fanConfig.fullScan}
+                                        onChange={(e) => setFanConfig({ ...fanConfig, fullScan: e.target.checked, rayCount: e.target.checked ? 36 : FAN_PRESETS.RAY_COUNT.MEDIUM })}
+                                        className="rounded"
+                                    />
+                                    <span className="font-semibold text-purple-700">360° 全方位スキャン</span>
+                                </label>
 
-                                <div className="text-xs font-semibold text-gray-700 mb-2">
-                                    レイ本数
-                                </div>
-                                <div className="flex gap-2 mb-3">
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.COARSE })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.COARSE
-                                            ? 'bg-green-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        粗 9本
-                                    </button>
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.MEDIUM
-                                            ? 'bg-green-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        中 13本
-                                    </button>
-                                    <button
-                                        onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.FINE })}
-                                        className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.FINE
-                                            ? 'bg-green-500 text-white font-semibold'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                            }`}
-                                    >
-                                        細 17本
-                                    </button>
-                                </div>
+                                {/* Partial fan controls (only when NOT fullScan) */}
+                                {!fanConfig.fullScan && (
+                                    <>
+                                        <div className="text-xs font-semibold text-gray-700 mb-2">
+                                            扇形幅 (Δθ)
+                                        </div>
+                                        <div className="flex gap-2 mb-3">
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.NARROW })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.NARROW
+                                                    ? 'bg-blue-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                狭 20°
+                                            </button>
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.MEDIUM
+                                                    ? 'bg-blue-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                中 40°
+                                            </button>
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.WIDE })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.WIDE
+                                                    ? 'bg-blue-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                広 80°
+                                            </button>
+                                        </div>
 
-                                <div className="text-xs text-gray-500">
-                                    {fanRayResults.length > 0 ? (
-                                        <>
-                                            {fanConfig.rayCount}本中 {fanRayResults.filter(r => r.hit).length}本遮蔽 / {fanRayResults.filter(r => !r.hit).length}本クリア
-                                        </>
-                                    ) : (
-                                        '計算中...'
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                                        <div className="text-xs font-semibold text-gray-700 mb-2">
+                                            レイ本数
+                                        </div>
+                                        <div className="flex gap-2 mb-3">
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.COARSE })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.COARSE
+                                                    ? 'bg-green-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                粗 9本
+                                            </button>
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.MEDIUM
+                                                    ? 'bg-green-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                中 13本
+                                            </button>
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.FINE })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.FINE
+                                                    ? 'bg-green-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                細 17本
+                                            </button>
+                                        </div>
 
-                        {loading && (
-                            <div className="text-sm text-blue-600">
-                                Loading elevation profile...
-                            </div>
-                        )}
+                                        <div className="text-xs text-gray-500">
+                                            {fanRayResults.length > 0 ? (
+                                                <>
+                                                    {fanRayResults.length}本中 {fanRayResults.filter(r => r.hit).length}本遮蔽 / {fanRayResults.filter(r => !r.hit).length}本クリア
+                                                </>
+                                            ) : (
+                                                '計算中...'
+                                            )}
+                                        </div>
+                                    </>
+                                )}
 
-                        {error && (
-                            <div className="text-sm text-red-600">
-                                Error: {error}
+                                {/* 360° mode controls */}
+                                {fanConfig.fullScan && (
+                                    <>
+                                        <div className="text-xs font-semibold text-gray-700 mb-2">
+                                            レイ本数 (360°)
+                                        </div>
+                                        <div className="flex gap-2 mb-3">
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 36 })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === 36
+                                                    ? 'bg-purple-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                36本 (10°)
+                                            </button>
+                                            <button
+                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 72 })}
+                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === 72
+                                                    ? 'bg-purple-500 text-white font-semibold'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                            >
+                                                72本 (5°)
+                                            </button>
+                                        </div>
+
+                                        <div className="text-xs font-semibold text-gray-700 mb-2">
+                                            最大距離: {fanConfig.maxRange}m
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="500"
+                                            max="5000"
+                                            step="100"
+                                            value={fanConfig.maxRange}
+                                            onChange={(e) => setFanConfig({ ...fanConfig, maxRange: parseInt(e.target.value) })}
+                                            className="w-full mb-3"
+                                        />
+
+                                        <div className="text-xs text-gray-500">
+                                            {fanRayResults.length > 0 ? (
+                                                <>
+                                                    {fanRayResults.length}本中 {fanRayResults.filter(r => r.hit).length}本遮蔽 / {fanRayResults.filter(r => !r.hit).length}本クリア
+                                                </>
+                                            ) : (
+                                                '360°スキャン待機中...'
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
+                                {loading && (
+                                    <div className="text-sm text-blue-600 mt-2">
+                                        Loading elevation profile...
+                                    </div>
+                                )}
+
+                                {error && (
+                                    <div className="text-sm text-red-600 mt-2">
+                                        Error: {error}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </>
