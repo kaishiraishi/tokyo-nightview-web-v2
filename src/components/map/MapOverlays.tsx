@@ -431,20 +431,7 @@ export function MapOverlays({ map, sourceLocation, currentLocation, targetLocati
                 getLineWidth: 3,
                 parameters: { depthTest: false },
             }),
-            // ✅ Ray endpoints (color-coded by Z source)
-            new ScatterplotLayer({
-                id: 'ray-ends-3d',
-                data: rayEnds,
-                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                getPosition: (d: any) => d.position,
-                getFillColor: (d: any) => d.color,
-                getRadius: (d: any) => d.radius ?? 5,
-                radiusUnits: 'pixels',
-                stroked: true,
-                getLineColor: [255, 255, 255],
-                getLineWidth: 1,
-                parameters: { depthTest: false },
-            }),
+
         ];
 
         overlayRef.current.setProps({ layers });

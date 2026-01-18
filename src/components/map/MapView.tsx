@@ -65,12 +65,12 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
 
     // Fan mode state
-    const [isFanMode, setIsFanMode] = useState<boolean>(false);
+    const [isFanMode, setIsFanMode] = useState<boolean>(true);
     const [fanConfig, setFanConfig] = useState<FanConfig>({
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
-        rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM,
+        rayCount: 36,
         maxRange: FAN_PRESETS.MAX_RANGE,
-        fullScan: false,
+        fullScan: true,
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
 
@@ -660,25 +660,36 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                 fanRayResults={fanRayResults}
             />
 
-            {/* Status overlay */}
-            <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg p-4 max-w-sm">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold mb-2">Tokyo Nightview - Step 1</h2>
+            {/* Status overlay (Glassmorphism) */}
+            {/* Status overlay (Glassmorphism) - Full Height Sidebar */}
+            <div className={`absolute top-0 left-0 bottom-0 w-80 bg-black/60 backdrop-blur-md border-r border-white/10 shadow-lg p-4 text-gray-100 transition-transform duration-300 ease-in-out flex flex-col overflow-y-auto ${isCollapsed ? '-translate-x-full' : 'translate-x-0'}`}>
+                <div className="flex items-center justify-between shrink-0 mb-4">
+                    <h2 className="text-lg font-semibold text-white">Tokyo Nightview</h2>
                     <button
                         aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
                         onClick={() => setIsCollapsed((s) => !s)}
-                        className="ml-2 text-sm bg-gray-100 hover:bg-gray-200 rounded px-2 py-1"
+                        className="text-sm bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 transition-colors"
                     >
-                        {isCollapsed ? '▾' : '▴'}
+                        ◀
                     </button>
+                    {/* Collapsed toggle button floating outside is needed if we hide the whole panel */}
                 </div>
+
+                {/* External Toggle Button when collapsed (Manual addition needed outside this div if using -translate-x-full) */}
+                {/* For now, we keep the button inside, but if hidden, user can't bring it back. 
+                    So we'll changing the collapse behavior:
+                    Instead of hiding the whole div, we might just shrink it or have a separate fixed toggle button.
+                    Let's adjust the className above to handle collapse better or add a separate button.
+                    Actually, if I translate-x-full, it's gone. 
+                    I should add a separate button outside for re-opening. 
+                */}
 
                 {!isCollapsed && (
                     <>
                         {geoError && (
-                            <div className="text-amber-600 text-sm mb-2 p-2 bg-amber-50 rounded">
+                            <div className="text-amber-400 text-sm mb-2 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
                                 <div className="font-semibold">📍 位置情報が利用できません</div>
-                                <div className="mt-1 text-xs">
+                                <div className="mt-1 text-xs text-amber-200">
                                     {geoError.includes('denied') || geoError.includes('permission') ? (
                                         <>
                                             ブラウザの設定で位置情報を許可してください。<br />
@@ -692,27 +703,27 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                         )}
 
                         {sourceLocation && (
-                            <div className="text-sm text-gray-700 mb-2">
+                            <div className="text-sm text-gray-200 mb-2">
                                 📍 基準点: {sourceLocation.lat.toFixed(5)}, {sourceLocation.lng.toFixed(5)}
                                 {currentLocation && sourceLocation === currentLocation && (
-                                    <span className="text-xs text-green-600 ml-1">(現在地)</span>
+                                    <span className="text-xs text-green-400 ml-1">(現在地)</span>
                                 )}
                             </div>
                         )}
 
                         {targetLocation && (
-                            <div className="text-sm text-gray-700 mb-2">
+                            <div className="text-sm text-gray-200 mb-2">
                                 🧭 向き指定点: {targetLocation.lat.toFixed(5)}, {targetLocation.lng.toFixed(5)}
-                                <div className="text-xs text-gray-500 mt-1">
+                                <div className="text-xs text-gray-400 mt-1">
                                     ※ この点は視線の方向を指定するためのものです
                                 </div>
                             </div>
                         )}
 
                         {!targetLocation && (
-                            <div className="text-sm text-gray-500 mb-2">
+                            <div className="text-sm text-gray-400 mb-2">
                                 {isSettingSource ? (
-                                    <span className="text-blue-600 font-semibold">地図をクリックして基準点を設定</span>
+                                    <span className="text-blue-400 font-semibold">地図をクリックして基準点を設定</span>
                                 ) : (
                                     '地図をクリックして視線の向きを指定'
                                 )}
@@ -723,23 +734,23 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                             <button
                                 onClick={() => setIsSettingSource(true)}
                                 disabled={isSettingSource}
-                                className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                className="text-xs bg-blue-600/80 text-white px-3 py-1 rounded hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors"
                             >
                                 基準点を手動設定
                             </button>
                         </div>
 
                         {/* Sight Angle Selector */}
-                        <div className="border-t pt-3 mt-3">
-                            <div className="text-xs font-semibold text-gray-700 mb-2">
+                        <div className="border-t border-white/10 pt-3 mt-3">
+                            <div className="text-xs font-semibold text-gray-300 mb-2">
                                 視線角度 (α)
                             </div>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.DOWN)}
                                     className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.DOWN
-                                        ? 'bg-orange-500 text-white font-semibold'
-                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        ? 'bg-orange-600 text-white font-semibold shadow-[0_0_10px_rgba(234,88,12,0.4)]'
+                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
                                         }`}
                                 >
                                     下向き -2°
@@ -747,8 +758,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                 <button
                                     onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.HORIZONTAL)}
                                     className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.HORIZONTAL
-                                        ? 'bg-blue-500 text-white font-semibold'
-                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        ? 'bg-blue-600 text-white font-semibold shadow-[0_0_10px_rgba(37,99,235,0.4)]'
+                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
                                         }`}
                                 >
                                     水平 0°
@@ -756,21 +767,21 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                 <button
                                     onClick={() => setSightAngle(SIGHT_ANGLE_PRESETS.UP)}
                                     className={`text-xs px-3 py-1.5 rounded transition-colors ${sightAngle === SIGHT_ANGLE_PRESETS.UP
-                                        ? 'bg-green-500 text-white font-semibold'
-                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        ? 'bg-green-600 text-white font-semibold shadow-[0_0_10px_rgba(22,163,74,0.4)]'
+                                        : 'bg-white/10 text-gray-200 hover:bg-white/20'
                                         }`}
                                 >
                                     上向き +2°
                                 </button>
                             </div>
-                            <div className="text-xs text-gray-500 mt-2">
+                            <div className="text-xs text-gray-400 mt-2">
                                 現在: α={sightAngle}° {rayResult?.hit && rayResult.distance && `(${rayResult.distance.toFixed(1)}m で遮蔽)`}
                             </div>
                         </div>
 
                         {/* VIIRS Opacity Control */}
-                        <div className="border-t pt-3 mt-3">
-                            <div className="text-xs font-semibold text-gray-700 mb-2">
+                        <div className="border-t border-white/10 pt-3 mt-3">
+                            <div className="text-xs font-semibold text-gray-300 mb-2">
                                 VIIRSナイトライト透明度
                             </div>
                             <div className="flex items-center gap-2">
@@ -781,187 +792,153 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                                     step="0.05"
                                     value={viirsOpacity}
                                     onChange={(e) => setViirsOpacity(parseFloat(e.target.value))}
-                                    className="flex-1"
+                                    className="flex-1 accent-blue-500"
                                 />
-                                <span className="text-xs text-gray-600 w-10 text-right">
+                                <span className="text-xs text-gray-400 w-10 text-right">
                                     {Math.round(viirsOpacity * 100)}%
                                 </span>
                             </div>
                         </div>
 
-                        {/* Fan Mode Toggle */}
-                        <div className="border-t pt-3 mt-3">
-                            <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={isFanMode}
-                                    onChange={(e) => setIsFanMode(e.target.checked)}
-                                    className="rounded"
-                                />
-                                <span className="font-semibold text-gray-700">扇形スキャンモード</span>
-                            </label>
-                        </div>
+                        {/* Scan Settings */}
+                        <div className="border-t border-white/10 pt-4 mt-4">
+                            <div className="text-sm font-semibold text-gray-200 mb-3">スキャン設定</div>
 
-                        {/* Fan Controls (only when fan mode is active) */}
-                        {isFanMode && (
-                            <div className="border-t pt-3 mt-3">
-                                {/* 360° Scan Toggle */}
-                                <label className="flex items-center gap-2 text-sm cursor-pointer mb-3">
-                                    <input
-                                        type="checkbox"
-                                        checked={fanConfig.fullScan}
-                                        onChange={(e) => setFanConfig({ ...fanConfig, fullScan: e.target.checked, rayCount: e.target.checked ? 36 : FAN_PRESETS.RAY_COUNT.MEDIUM })}
-                                        className="rounded"
-                                    />
-                                    <span className="font-semibold text-purple-700">360° 全方位スキャン</span>
-                                </label>
+                            {/* Mode Selector */}
+                            <div className="flex bg-black/40 rounded-lg p-1 mb-4">
+                                <button
+                                    onClick={() => setFanConfig({ ...fanConfig, fullScan: true, rayCount: 36 })}
+                                    className={`flex-1 text-xs py-1.5 rounded-md transition-all ${fanConfig.fullScan
+                                        ? 'bg-purple-600 text-white font-semibold shadow-sm'
+                                        : 'text-gray-400 hover:text-gray-200'
+                                        }`}
+                                >
+                                    360° 全方位
+                                </button>
+                                <button
+                                    onClick={() => setFanConfig({ ...fanConfig, fullScan: false, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
+                                    className={`flex-1 text-xs py-1.5 rounded-md transition-all ${!fanConfig.fullScan
+                                        ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                                        : 'text-gray-400 hover:text-gray-200'
+                                        }`}
+                                >
+                                    扇形 (Sector)
+                                </button>
+                            </div>
 
-                                {/* Partial fan controls (only when NOT fullScan) */}
-                                {!fanConfig.fullScan && (
-                                    <>
-                                        <div className="text-xs font-semibold text-gray-700 mb-2">
-                                            扇形幅 (Δθ)
-                                        </div>
-                                        <div className="flex gap-2 mb-3">
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.NARROW })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.NARROW
-                                                    ? 'bg-blue-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                狭 20°
-                                            </button>
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.MEDIUM
-                                                    ? 'bg-blue-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                中 40°
-                                            </button>
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, deltaTheta: FAN_PRESETS.DELTA_THETA.WIDE })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.deltaTheta === FAN_PRESETS.DELTA_THETA.WIDE
-                                                    ? 'bg-blue-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                広 80°
-                                            </button>
-                                        </div>
-
-                                        <div className="text-xs font-semibold text-gray-700 mb-2">
-                                            レイ本数
-                                        </div>
-                                        <div className="flex gap-2 mb-3">
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.COARSE })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.COARSE
-                                                    ? 'bg-green-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                粗 9本
-                                            </button>
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.MEDIUM })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.MEDIUM
-                                                    ? 'bg-green-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                中 13本
-                                            </button>
-                                            <button
-                                                onClick={() => setFanConfig({ ...fanConfig, rayCount: FAN_PRESETS.RAY_COUNT.FINE })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === FAN_PRESETS.RAY_COUNT.FINE
-                                                    ? 'bg-green-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                    }`}
-                                            >
-                                                細 17本
-                                            </button>
-                                        </div>
-
-                                        <div className="text-xs text-gray-500">
-                                            {fanRayResults.length > 0 ? (
-                                                <>
-                                                    {fanRayResults.length}本中 {fanRayResults.filter(r => r.hit).length}本遮蔽 / {fanRayResults.filter(r => !r.hit).length}本クリア
-                                                </>
-                                            ) : (
-                                                '計算中...'
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* 360° mode controls */}
-                                {fanConfig.fullScan && (
-                                    <>
-                                        <div className="text-xs font-semibold text-gray-700 mb-2">
-                                            レイ本数 (360°)
-                                        </div>
-                                        <div className="flex gap-2 mb-3">
+                            {/* 360° Controls */}
+                            {fanConfig.fullScan && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="text-xs font-semibold text-gray-300 mb-2">レイ本数 (精度)</div>
+                                        <div className="flex gap-2">
                                             <button
                                                 onClick={() => setFanConfig({ ...fanConfig, rayCount: 36 })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === 36
-                                                    ? 'bg-purple-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === 36 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
                                                     }`}
                                             >
-                                                36本 (10°)
+                                                36本 (10°毎)
                                             </button>
                                             <button
                                                 onClick={() => setFanConfig({ ...fanConfig, rayCount: 72 })}
-                                                className={`text-xs px-3 py-1.5 rounded transition-colors ${fanConfig.rayCount === 72
-                                                    ? 'bg-purple-500 text-white font-semibold'
-                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === 72 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
                                                     }`}
                                             >
-                                                72本 (5°)
+                                                72本 (5°毎)
                                             </button>
                                         </div>
+                                    </div>
 
-                                        <div className="text-xs font-semibold text-gray-700 mb-2">
-                                            最大距離: {fanConfig.maxRange}m
+                                    <div>
+                                        <div className="flex justify-between text-xs font-semibold text-gray-300 mb-2">
+                                            <span>最大距離</span>
+                                            <span>{fanConfig.maxRange}m</span>
                                         </div>
                                         <input
                                             type="range"
                                             min="500"
-                                            max="5000"
-                                            step="100"
+                                            max="10000"
+                                            step="500"
                                             value={fanConfig.maxRange}
                                             onChange={(e) => setFanConfig({ ...fanConfig, maxRange: parseInt(e.target.value) })}
-                                            className="w-full mb-3"
+                                            className="w-full accent-purple-500"
                                         />
+                                    </div>
+                                </div>
+                            )}
 
-                                        <div className="text-xs text-gray-500">
-                                            {fanRayResults.length > 0 ? (
-                                                <>
-                                                    {fanRayResults.length}本中 {fanRayResults.filter(r => r.hit).length}本遮蔽 / {fanRayResults.filter(r => !r.hit).length}本クリア
-                                                </>
-                                            ) : (
-                                                '360°スキャン待機中...'
-                                            )}
+                            {/* Sector Controls */}
+                            {!fanConfig.fullScan && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="text-xs font-semibold text-gray-300 mb-2">扇形幅 (Δθ)</div>
+                                        <div className="flex gap-2">
+                                            {[
+                                                { label: '狭 20°', val: FAN_PRESETS.DELTA_THETA.NARROW },
+                                                { label: '中 40°', val: FAN_PRESETS.DELTA_THETA.MEDIUM },
+                                                { label: '広 80°', val: FAN_PRESETS.DELTA_THETA.WIDE },
+                                            ].map((opt) => (
+                                                <button
+                                                    key={opt.val}
+                                                    onClick={() => setFanConfig({ ...fanConfig, deltaTheta: opt.val })}
+                                                    className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.deltaTheta === opt.val ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                                                        }`}
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-semibold text-gray-300 mb-2">レイ本数</div>
+                                        <div className="flex gap-2">
+                                            {[
+                                                { label: '粗 9本', val: FAN_PRESETS.RAY_COUNT.COARSE },
+                                                { label: '中 13本', val: FAN_PRESETS.RAY_COUNT.MEDIUM },
+                                                { label: '細 17本', val: FAN_PRESETS.RAY_COUNT.FINE },
+                                            ].map((opt) => (
+                                                <button
+                                                    key={opt.val}
+                                                    onClick={() => setFanConfig({ ...fanConfig, rayCount: opt.val })}
+                                                    className={`flex-1 text-xs py-1.5 rounded transition-colors ${fanConfig.rayCount === opt.val ? 'bg-green-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                                                        }`}
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Status Info */}
+                        <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
+                            <div className="text-xs text-gray-300 space-y-1">
+                                {loading ? (
+                                    <div className="text-blue-400 animate-pulse">Scanning terrain...</div>
+                                ) : error ? (
+                                    <div className="text-red-400">Error: {error}</div>
+                                ) : fanRayResults.length > 0 ? (
+                                    <>
+                                        <div className="flex justify-between">
+                                            <span>総レイ数:</span>
+                                            <span className="font-mono">{fanRayResults.length}</span>
+                                        </div>
+                                        <div className="flex justify-between text-red-300">
+                                            <span>遮蔽 (Blocked):</span>
+                                            <span className="font-mono">{fanRayResults.filter(r => r.hit).length}</span>
+                                        </div>
+                                        <div className="flex justify-between text-green-300">
+                                            <span>通過 (Clear):</span>
+                                            <span className="font-mono">{fanRayResults.filter(r => !r.hit).length}</span>
                                         </div>
                                     </>
-                                )}
-
-                                {loading && (
-                                    <div className="text-sm text-blue-600 mt-2">
-                                        Loading elevation profile...
-                                    </div>
-                                )}
-
-                                {error && (
-                                    <div className="text-sm text-red-600 mt-2">
-                                        Error: {error}
-                                    </div>
+                                ) : (
+                                    <div className="text-gray-500 italic text-center">Ready to scan</div>
                                 )}
                             </div>
-                        )}
+                        </div>
                     </>
                 )}
             </div>

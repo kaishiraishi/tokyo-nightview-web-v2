@@ -40,8 +40,9 @@ function App() {
     }, []);
 
     return (
-        <div className="w-screen h-screen flex flex-col">
-            <div className="flex-1 min-h-0">
+        <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
+            {/* Full Screen Map */}
+            <div className="absolute inset-0">
                 <MapView
                     onProfileChange={handleProfileChange}
                     onRayResultChange={handleRayResultChange}
@@ -52,14 +53,18 @@ function App() {
                 />
             </div>
 
-            <div className="h-[40vh] border-t-2 border-gray-300">
-                <ProfileChart
-                    profile={profile}
-                    onHover={handleHover}
-                    onClick={handleClick}
-                    occlusionDistance={rayResult?.distance || null}
-                    zoomLevel={zoomLevel}
-                />
+            {/* Floating Profile Overlay */}
+            {/* Positioned at bottom center with some margin */}
+            <div className="absolute bottom-6 left-4 right-4 h-64 z-20 pointer-events-none flex justify-center">
+                <div className="w-full max-w-5xl pointer-events-auto h-full">
+                    <ProfileChart
+                        profile={profile}
+                        onHover={handleHover}
+                        onClick={handleClick}
+                        occlusionDistance={rayResult?.distance || null}
+                        zoomLevel={zoomLevel}
+                    />
+                </div>
             </div>
         </div>
     );

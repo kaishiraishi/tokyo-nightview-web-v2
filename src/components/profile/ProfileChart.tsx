@@ -18,10 +18,10 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
     };
     if (!profile) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-gray-50 flex-col">
-                <p className="text-gray-500">Click on the map to select a target point</p>
+            <div className="w-full h-full flex items-center justify-center bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg flex-col transition-all duration-300">
+                <p className="text-gray-300 font-medium">地図をクリックしてターゲット地点を選択してください</p>
                 {zoomLevel !== null && (
-                    <p className="text-gray-400 text-sm mt-2">Current Zoom: {zoomLevel.toFixed(2)}</p>
+                    <p className="text-gray-500 text-sm mt-2">Current Zoom: {zoomLevel.toFixed(2)}</p>
                 )}
             </div>
         );
@@ -34,8 +34,8 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
 
     if (validElevations.length === 0) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                <p className="text-red-500">No elevation data available for this route</p>
+            <div className="w-full h-full flex items-center justify-center bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg">
+                <p className="text-red-400 font-semibold">このルートには標高データがありません</p>
             </div>
         );
     }
@@ -85,14 +85,13 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
     }
 
     return (
-        <div className="w-full h-full bg-white p-4">
-            <div className="mb-2 flex justify-between items-end">
+        <div className="w-full h-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-4 transition-all duration-300 flex flex-col">
+            <div className="mb-2 flex justify-between items-end shrink-0">
                 <div>
-                    <h3 className="text-lg font-semibold">Elevation Profile</h3>
-                    <div className="text-sm text-gray-600">
-                        Distance: {(totalDistance / 1000).toFixed(2)} km |
-                        Max Elevation: {maxElev.toFixed(1)} m |
-                        Min Elevation: {minElev.toFixed(1)} m
+                    <h3 className="text-lg font-semibold text-white">地形断面図</h3>
+                    <div className="text-sm text-gray-300">
+                        距離: {(totalDistance / 1000).toFixed(2)} km |
+                        標高: <span className="text-blue-300">{minElev.toFixed(1)}m</span> - <span className="text-red-300">{maxElev.toFixed(1)}m</span>
                     </div>
                 </div>
                 {zoomLevel !== null && (
@@ -102,291 +101,293 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance, zoo
                 )}
             </div>
 
-            <svg
-                viewBox={`0 0 ${width} ${height}`}
-                className="w-full"
-                style={{ maxHeight: '300px' }}
-            >
-                {/* Grid lines */}
-                <g className="grid" stroke="#e5e7eb" strokeWidth="1">
-                    {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+            <div className="flex-1 min-h-0 relative">
+                <svg
+                    viewBox={`0 0 ${width} ${height}`}
+                    className="w-full h-full"
+                    preserveAspectRatio="xMidYMid meet"
+                >
+                    {/* Grid lines */}
+                    <g className="grid" stroke="rgba(255,255,255,0.1)" strokeWidth="1">
+                        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+                            <line
+                                key={`grid-y-${ratio}`}
+                                x1={padding.left}
+                                y1={padding.top + chartHeight * ratio}
+                                x2={padding.left + chartWidth}
+                                y2={padding.top + chartHeight * ratio}
+                            />
+                        ))}
+                    </g>
+
+                    {/* Axes */}
+                    <g className="axes" stroke="rgba(255,255,255,0.3)" strokeWidth="2" fill="none">
                         <line
-                            key={`grid-y-${ratio}`}
                             x1={padding.left}
-                            y1={padding.top + chartHeight * ratio}
+                            y1={padding.top}
+                            x2={padding.left}
+                            y2={padding.top + chartHeight}
+                        />
+                        <line
+                            x1={padding.left}
+                            y1={padding.top + chartHeight}
                             x2={padding.left + chartWidth}
-                            y2={padding.top + chartHeight * ratio}
+                            y2={padding.top + chartHeight}
                         />
-                    ))}
-                </g>
+                    </g>
 
-                {/* Axes */}
-                <g className="axes" stroke="#374151" strokeWidth="2" fill="none">
-                    <line
-                        x1={padding.left}
-                        y1={padding.top}
-                        x2={padding.left}
-                        y2={padding.top + chartHeight}
-                    />
-                    <line
-                        x1={padding.left}
-                        y1={padding.top + chartHeight}
-                        x2={padding.left + chartWidth}
-                        y2={padding.top + chartHeight}
-                    />
-                </g>
+                    {/* Y-axis labels */}
+                    <g className="y-labels" fill="rgba(255,255,255,0.7)" fontSize="12">
+                        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                            const elev = minElev + (maxElev - minElev) * (1 - ratio);
+                            return (
+                                <text
+                                    key={`y-label-${ratio}`}
+                                    x={padding.left - 10}
+                                    y={padding.top + chartHeight * ratio}
+                                    textAnchor="end"
+                                    dominantBaseline="middle"
+                                >
+                                    {elev.toFixed(0)}m
+                                </text>
+                            );
+                        })}
+                    </g>
 
-                {/* Y-axis labels */}
-                <g className="y-labels" fill="#374151" fontSize="12">
-                    {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-                        const elev = minElev + (maxElev - minElev) * (1 - ratio);
-                        return (
-                            <text
-                                key={`y-label-${ratio}`}
-                                x={padding.left - 10}
-                                y={padding.top + chartHeight * ratio}
-                                textAnchor="end"
-                                dominantBaseline="middle"
-                            >
-                                {elev.toFixed(0)}m
-                            </text>
-                        );
-                    })}
-                </g>
+                    {/* X-axis labels */}
+                    <g className="x-labels" fill="rgba(255,255,255,0.7)" fontSize="12">
+                        {[0, 0.5, 1].map((ratio) => {
+                            const dist = (totalDistance / 1000) * ratio;
+                            return (
+                                <text
+                                    key={`x-label-${ratio}`}
+                                    x={padding.left + chartWidth * ratio}
+                                    y={padding.top + chartHeight + 25}
+                                    textAnchor="middle"
+                                >
+                                    {dist.toFixed(1)}km
+                                </text>
+                            );
+                        })}
+                    </g>
 
-                {/* X-axis labels */}
-                <g className="x-labels" fill="#374151" fontSize="12">
-                    {[0, 0.5, 1].map((ratio) => {
-                        const dist = (totalDistance / 1000) * ratio;
-                        return (
-                            <text
-                                key={`x-label-${ratio}`}
-                                x={padding.left + chartWidth * ratio}
-                                y={padding.top + chartHeight + 25}
-                                textAnchor="middle"
-                            >
-                                {dist.toFixed(1)}km
-                            </text>
-                        );
-                    })}
-                </g>
+                    {/* Profile line */}
+                    <g transform={`translate(${padding.left}, ${padding.top})`}>
+                        {pathSegments.map((path, i) => (
+                            <path
+                                key={i}
+                                d={path}
+                                fill="none"
+                                stroke="#60a5fa" // blue-400
+                                strokeWidth="2"
+                            />
+                        ))}
 
-                {/* Profile line */}
-                <g transform={`translate(${padding.left}, ${padding.top})`}>
-                    {pathSegments.map((path, i) => (
-                        <path
-                            key={i}
-                            d={path}
-                            fill="none"
-                            stroke="#3b82f6"
-                            strokeWidth="2"
+                        {/* Full-width interaction layer - tracks mouse across entire chart */}
+                        <rect
+                            x={0}
+                            y={0}
+                            width={chartWidth}
+                            height={chartHeight}
+                            fill="transparent"
+                            cursor="crosshair"
+                            onMouseMove={(e) => {
+                                const svg = e.currentTarget.ownerSVGElement;
+                                if (!svg) return;
+
+                                const rect = svg.getBoundingClientRect();
+
+                                // ✅ CSS px -> viewBox units conversion
+                                const scaleX = width / rect.width;
+                                const svgX = (e.clientX - rect.left) * scaleX;
+
+                                // Group coordinate system (inside translate(padding.left, padding.top))
+                                const mouseX = svgX - padding.left;
+
+                                const clampedMouseX = Math.max(0, Math.min(mouseX, chartWidth));
+
+                                // Find the data point whose x position is closest to the mouse X
+                                let nearestIndex = 0;
+                                let minDiff = Math.abs(xScale(distances_m[0]) - clampedMouseX);
+
+                                for (let i = 1; i < distances_m.length; i++) {
+                                    const dataPointX = xScale(distances_m[i]);
+                                    const diff = Math.abs(dataPointX - clampedMouseX);
+                                    if (diff < minDiff) {
+                                        minDiff = diff;
+                                        nearestIndex = i;
+                                    }
+                                }
+
+                                // ✅ Clear hover when over null region
+                                if (elev_m[nearestIndex] !== null) {
+                                    handleHover(nearestIndex);
+                                } else {
+                                    handleHover(null);
+                                }
+                            }}
+                            onMouseLeave={() => handleHover(null)}
+                            onClick={() => {
+                                if (localHoveredIndex !== null) {
+                                    onClick(localHoveredIndex);
+                                }
+                            }}
                         />
-                    ))}
 
-                    {/* Full-width interaction layer - tracks mouse across entire chart */}
-                    <rect
-                        x={0}
-                        y={0}
-                        width={chartWidth}
-                        height={chartHeight}
-                        fill="transparent"
-                        cursor="crosshair"
-                        onMouseMove={(e) => {
-                            const svg = e.currentTarget.ownerSVGElement;
-                            if (!svg) return;
+                        {/* Hover visualization - vertical line, dot, and tooltip */}
+                        {localHoveredIndex !== null && elev_m[localHoveredIndex] !== null && (
+                            <>
+                                {/* Vertical line */}
+                                <line
+                                    x1={xScale(distances_m[localHoveredIndex])}
+                                    y1={-padding.top}
+                                    x2={xScale(distances_m[localHoveredIndex])}
+                                    y2={chartHeight + padding.bottom}
+                                    stroke="#ef4444"
+                                    strokeWidth="1"
+                                    strokeDasharray="4 2"
+                                    pointerEvents="none"
+                                />
+                                {/* Highlight dot */}
+                                <circle
+                                    cx={xScale(distances_m[localHoveredIndex])}
+                                    cy={yScale(elev_m[localHoveredIndex]!)}
+                                    r={5}
+                                    fill="#ef4444"
+                                    stroke="white"
+                                    strokeWidth="2"
+                                    pointerEvents="none"
+                                />
+                                {/* Tooltip with elevation and distance */}
+                                {(() => {
+                                    const hx = xScale(distances_m[localHoveredIndex]);
+                                    const hy = yScale(elev_m[localHoveredIndex]!);
 
-                            const rect = svg.getBoundingClientRect();
+                                    const tooltipW = 80;
+                                    const tooltipH = 30;
 
-                            // ✅ CSS px -> viewBox units conversion
-                            const scaleX = width / rect.width;
-                            const svgX = (e.clientX - rect.left) * scaleX;
+                                    // ✅ Clamp tooltip position to prevent cutoff at edges
+                                    const tooltipX = Math.max(0, Math.min(hx - tooltipW / 2, chartWidth - tooltipW));
+                                    const tooltipY = Math.max(0, Math.min(hy - 40, chartHeight - tooltipH));
 
-                            // Group coordinate system (inside translate(padding.left, padding.top))
-                            const mouseX = svgX - padding.left;
+                                    return (
+                                        <g pointerEvents="none">
+                                            <rect
+                                                x={tooltipX}
+                                                y={tooltipY}
+                                                width={tooltipW}
+                                                height={tooltipH}
+                                                fill="rgba(30,30,30,0.9)"
+                                                stroke="rgba(255,255,255,0.2)"
+                                                strokeWidth="1"
+                                                rx="4"
+                                                opacity="1"
+                                            />
+                                            <text
+                                                x={tooltipX + tooltipW / 2}
+                                                y={tooltipY + 12}
+                                                textAnchor="middle"
+                                                fontSize="11"
+                                                fill="white"
+                                                fontWeight="600"
+                                            >
+                                                {elev_m[localHoveredIndex]!.toFixed(1)}m
+                                            </text>
+                                            <text
+                                                x={tooltipX + tooltipW / 2}
+                                                y={tooltipY + 24}
+                                                textAnchor="middle"
+                                                fontSize="9"
+                                                fill="#9ca3af" // gray-400
+                                            >
+                                                {(distances_m[localHoveredIndex] / 1000).toFixed(2)}km
+                                            </text>
+                                        </g>
+                                    );
+                                })()}
+                            </>
+                        )}
 
-                            const clampedMouseX = Math.max(0, Math.min(mouseX, chartWidth));
-
-                            // Find the data point whose x position is closest to the mouse X
+                        {/* Occlusion point marker (amber/orange) */}
+                        {occlusionDistance !== null && profile && (() => {
+                            // Find the index closest to the occlusion distance
                             let nearestIndex = 0;
-                            let minDiff = Math.abs(xScale(distances_m[0]) - clampedMouseX);
+                            let minDiff = Math.abs(distances_m[0] - occlusionDistance);
 
                             for (let i = 1; i < distances_m.length; i++) {
-                                const dataPointX = xScale(distances_m[i]);
-                                const diff = Math.abs(dataPointX - clampedMouseX);
+                                const diff = Math.abs(distances_m[i] - occlusionDistance);
                                 if (diff < minDiff) {
                                     minDiff = diff;
                                     nearestIndex = i;
                                 }
                             }
 
-                            // ✅ Clear hover when over null region
-                            if (elev_m[nearestIndex] !== null) {
-                                handleHover(nearestIndex);
-                            } else {
-                                handleHover(null);
-                            }
-                        }}
-                        onMouseLeave={() => handleHover(null)}
-                        onClick={() => {
-                            if (localHoveredIndex !== null) {
-                                onClick(localHoveredIndex);
-                            }
-                        }}
-                    />
+                            const occlusionElev = elev_m[nearestIndex];
+                            if (occlusionElev === null) return null;
 
-                    {/* Hover visualization - vertical line, dot, and tooltip */}
-                    {localHoveredIndex !== null && elev_m[localHoveredIndex] !== null && (
-                        <>
-                            {/* Vertical line */}
-                            <line
-                                x1={xScale(distances_m[localHoveredIndex])}
-                                y1={-padding.top}
-                                x2={xScale(distances_m[localHoveredIndex])}
-                                y2={chartHeight + padding.bottom}
-                                stroke="#ef4444"
-                                strokeWidth="1"
-                                strokeDasharray="4 2"
-                                pointerEvents="none"
-                            />
-                            {/* Highlight dot */}
-                            <circle
-                                cx={xScale(distances_m[localHoveredIndex])}
-                                cy={yScale(elev_m[localHoveredIndex]!)}
-                                r={5}
-                                fill="#ef4444"
-                                stroke="white"
-                                strokeWidth="2"
-                                pointerEvents="none"
-                            />
-                            {/* Tooltip with elevation and distance */}
-                            {(() => {
-                                const hx = xScale(distances_m[localHoveredIndex]);
-                                const hy = yScale(elev_m[localHoveredIndex]!);
-
-                                const tooltipW = 80;
-                                const tooltipH = 30;
-
-                                // ✅ Clamp tooltip position to prevent cutoff at edges
-                                const tooltipX = Math.max(0, Math.min(hx - tooltipW / 2, chartWidth - tooltipW));
-                                const tooltipY = Math.max(0, Math.min(hy - 40, chartHeight - tooltipH));
-
-                                return (
+                            return (
+                                <>
+                                    {/* Vertical line at occlusion point */}
+                                    <line
+                                        x1={xScale(occlusionDistance)}
+                                        y1={-padding.top}
+                                        x2={xScale(occlusionDistance)}
+                                        y2={chartHeight + padding.bottom}
+                                        stroke="#f59e0b"
+                                        strokeWidth="2"
+                                        strokeDasharray="4 2"
+                                        pointerEvents="none"
+                                    />
+                                    {/* Large occlusion marker */}
+                                    <circle
+                                        cx={xScale(occlusionDistance)}
+                                        cy={yScale(occlusionElev)}
+                                        r={7}
+                                        fill="#f59e0b"
+                                        stroke="white"
+                                        strokeWidth="2"
+                                        pointerEvents="none"
+                                    />
+                                    {/* Label for occlusion point */}
                                     <g pointerEvents="none">
                                         <rect
-                                            x={tooltipX}
-                                            y={tooltipY}
-                                            width={tooltipW}
-                                            height={tooltipH}
-                                            fill="white"
-                                            stroke="#374151"
-                                            strokeWidth="1"
+                                            x={xScale(occlusionDistance) - 50}
+                                            y={yScale(occlusionElev) - 50}
+                                            width="100"
+                                            height="35"
+                                            fill="#f59e0b"
+                                            stroke="white"
+                                            strokeWidth="2"
                                             rx="4"
                                             opacity="0.95"
                                         />
                                         <text
-                                            x={tooltipX + tooltipW / 2}
-                                            y={tooltipY + 12}
+                                            x={xScale(occlusionDistance)}
+                                            y={yScale(occlusionElev) - 34}
                                             textAnchor="middle"
-                                            fontSize="11"
-                                            fill="#374151"
-                                            fontWeight="600"
+                                            fontSize="10"
+                                            fill="white"
+                                            fontWeight="700"
                                         >
-                                            {elev_m[localHoveredIndex]!.toFixed(1)}m
+                                            ⚠ OCCLUSION
                                         </text>
                                         <text
-                                            x={tooltipX + tooltipW / 2}
-                                            y={tooltipY + 24}
+                                            x={xScale(occlusionDistance)}
+                                            y={yScale(occlusionElev) - 22}
                                             textAnchor="middle"
-                                            fontSize="9"
-                                            fill="#6b7280"
+                                            fontSize="11"
+                                            fill="white"
+                                            fontWeight="600"
                                         >
-                                            {(distances_m[localHoveredIndex] / 1000).toFixed(2)}km
+                                            {occlusionElev.toFixed(1)}m
                                         </text>
                                     </g>
-                                );
-                            })()}
-                        </>
-                    )}
-
-                    {/* Occlusion point marker (amber/orange) */}
-                    {occlusionDistance !== null && profile && (() => {
-                        // Find the index closest to the occlusion distance
-                        let nearestIndex = 0;
-                        let minDiff = Math.abs(distances_m[0] - occlusionDistance);
-
-                        for (let i = 1; i < distances_m.length; i++) {
-                            const diff = Math.abs(distances_m[i] - occlusionDistance);
-                            if (diff < minDiff) {
-                                minDiff = diff;
-                                nearestIndex = i;
-                            }
-                        }
-
-                        const occlusionElev = elev_m[nearestIndex];
-                        if (occlusionElev === null) return null;
-
-                        return (
-                            <>
-                                {/* Vertical line at occlusion point */}
-                                <line
-                                    x1={xScale(occlusionDistance)}
-                                    y1={-padding.top}
-                                    x2={xScale(occlusionDistance)}
-                                    y2={chartHeight + padding.bottom}
-                                    stroke="#f59e0b"
-                                    strokeWidth="2"
-                                    strokeDasharray="4 2"
-                                    pointerEvents="none"
-                                />
-                                {/* Large occlusion marker */}
-                                <circle
-                                    cx={xScale(occlusionDistance)}
-                                    cy={yScale(occlusionElev)}
-                                    r={7}
-                                    fill="#f59e0b"
-                                    stroke="white"
-                                    strokeWidth="2"
-                                    pointerEvents="none"
-                                />
-                                {/* Label for occlusion point */}
-                                <g pointerEvents="none">
-                                    <rect
-                                        x={xScale(occlusionDistance) - 50}
-                                        y={yScale(occlusionElev) - 50}
-                                        width="100"
-                                        height="35"
-                                        fill="#f59e0b"
-                                        stroke="white"
-                                        strokeWidth="2"
-                                        rx="4"
-                                        opacity="0.95"
-                                    />
-                                    <text
-                                        x={xScale(occlusionDistance)}
-                                        y={yScale(occlusionElev) - 34}
-                                        textAnchor="middle"
-                                        fontSize="10"
-                                        fill="white"
-                                        fontWeight="700"
-                                    >
-                                        ⚠ OCCLUSION
-                                    </text>
-                                    <text
-                                        x={xScale(occlusionDistance)}
-                                        y={yScale(occlusionElev) - 22}
-                                        textAnchor="middle"
-                                        fontSize="11"
-                                        fill="white"
-                                        fontWeight="600"
-                                    >
-                                        {occlusionElev.toFixed(1)}m
-                                    </text>
-                                </g>
-                            </>
-                        );
-                    })()}
-                </g>
-            </svg>
+                                </>
+                            );
+                        })()}
+                    </g>
+                </svg>
+            </div>
         </div>
     );
 }
