@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
+import { LayerMenu } from './LayerMenu';
 import { fetchProfile } from '../../lib/api/dsmApi';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import { CurrentLocationButton } from '../ui/CurrentLocationButton';
@@ -10,18 +11,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 
 import { ScanSettingsModal } from '../ui/ScanSettingsModal';
 import { SIGHT_ANGLE_PRESETS, FAN_PRESETS } from '../../config/scanConstants';
+import type { FanConfig, ScanStep } from './types';
 
 const NORTH_THRESHOLD_DEG = 5;
-
-// Fan-shaped scanning configuration
-type FanConfig = {
-    deltaTheta: number;  // Fan angle width in degrees (e.g., 20, 40, 80)
-    rayCount: number;    // Number of rays (e.g., 9, 13, 17)
-    maxRange: number;    // Maximum ray distance in meters (e.g., 2000)
-    fullScan: boolean;   // If true, scan 360° from source (no target needed)
-};
-
-type ScanStep = 'idle' | 'selecting_source' | 'selecting_target' | 'adjusting_angle' | 'scanning' | 'complete';
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
@@ -34,7 +26,7 @@ type MapViewProps = {
     setIsSidebarOpen: (isOpen: boolean) => void;
 };
 
-export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange, isSidebarOpen, setIsSidebarOpen }: MapViewProps) {
+export function MapViewExplore({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange, isSidebarOpen, setIsSidebarOpen }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
@@ -56,6 +48,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
     const [northResetTrigger, setNorthResetTrigger] = useState<number>(0);
     const [isLocating, setIsLocating] = useState(false);
     const [locateError, setLocateError] = useState<string | null>(null);
+    const hasAutoSetSourceRef = useRef(false);
 
     const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
     // const [isCollapsed, setIsCollapsed] = useState(false); // Lifted to App.tsx
@@ -72,12 +65,12 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
         rayCount: 36,
         maxRange: FAN_PRESETS.MAX_RANGE,
-        fullScan: true,
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
 
     // VIIRS layer opacity state
     const [viirsOpacity, setViirsOpacity] = useState<number>(0.7);
+    const canExecuteScan = !loading && !!sourceLocation && !!targetLocation;
 
     // Ray-based occlusion detection with sight angle α
     function findFirstOcclusion(
@@ -311,87 +304,6 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         return results;
     }
 
-    // Generate 360° omnidirectional rays (no target needed)
-    async function generate360Rays(
-        sourceLocation: LngLat,
-        fanConfig: FanConfig,
-        sightAngle: number,
-        sourceZ0: number
-    ): Promise<FanRayResult[]> {
-        const { rayCount, maxRange } = fanConfig;
-
-        // Generate evenly spaced azimuths from 0° to 360°
-        const rayAzimuths: number[] = [];
-        for (let j = 0; j < rayCount; j++) {
-            const theta_j = (j * 360) / rayCount;
-            rayAzimuths.push(theta_j);
-        }
-
-        const tanAlpha = Math.tan((sightAngle * Math.PI) / 180);
-        const startP = { lng: sourceLocation.lng, lat: sourceLocation.lat, z: sourceZ0 };
-
-        console.log(`[360° Scan] Starting with ${rayCount} rays, maxRange=${maxRange}m`);
-
-        const profilePromises = rayAzimuths.map(async (azimuth, index) => {
-            const endpoint = calculateEndpoint(sourceLocation, azimuth, maxRange);
-
-            const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
-                .distanceTo(new maplibregl.LngLat(endpoint.lng, endpoint.lat));
-
-            const sampleCount = Math.min(500, Math.max(120, Math.ceil(distance / 20)));
-
-            try {
-                const profile = await fetchProfile(sourceLocation, endpoint, sampleCount);
-
-                const result = findFirstOcclusion(profile, sightAngle, sourceLocation, sourceZ0);
-
-                if (result.rayGeometry) {
-                    result.rayGeometry = { ...result.rayGeometry, start: startP };
-                } else {
-                    result.rayGeometry = { start: startP, end: { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange } };
-                }
-
-                return {
-                    ...result,
-                    azimuth,
-                    rayIndex: index,
-                    maxRangePoint: endpoint,
-                } as FanRayResult;
-            } catch (error) {
-                console.error(`[360° Ray ${index}] Failed at azimuth ${azimuth.toFixed(1)}°:`, error);
-
-                const endP = { lng: endpoint.lng, lat: endpoint.lat, z: sourceZ0 + tanAlpha * maxRange };
-
-                return {
-                    hit: false,
-                    distance: null,
-                    hitPoint: null,
-                    elevation: null,
-                    reason: 'clear',
-                    sourcePoint: startP,
-                    rayGeometry: { start: startP, end: endP },
-                    azimuth,
-                    rayIndex: index,
-                    maxRangePoint: endpoint,
-                } as FanRayResult;
-            }
-        });
-
-        const results = await Promise.all(profilePromises);
-
-        const hitCount = results.filter(r => r.hit).length;
-        console.log(`[360° Scan] Complete: ${hitCount} blocked, ${rayCount - hitCount} clear`);
-
-        return results;
-    }
-
-    // Auto-set source location from geolocation when available
-    useEffect(() => {
-        if (currentLocation) {
-            setSourceLocation(currentLocation);
-        }
-    }, [currentLocation]);
-
     // Fallback: Use map center when geolocation fails
     useEffect(() => {
         if (geoError && map && !sourceLocation) {
@@ -400,19 +312,36 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         }
     }, [geoError, map, sourceLocation]);
 
+    useEffect(() => {
+        if (hasAutoSetSourceRef.current) return;
+        if (currentLocation && !sourceLocation) {
+            setSourceLocation(currentLocation);
+            hasAutoSetSourceRef.current = true;
+        }
+    }, [currentLocation, sourceLocation]);
+
     // Update VIIRS layer opacity
     useEffect(() => {
         if (!map || !isLoaded) return;
+        if (!map.isStyleLoaded?.() || !map.getStyle?.()) return;
 
-        // Defensive coding: access map safely
-        const layer = map.getLayer ? map.getLayer('viirs-nightlight-layer') : null;
+        const layer = map.getLayer?.('viirs-nightlight-layer') ?? null;
 
         if (layer && map.setPaintProperty) {
             map.setPaintProperty('viirs-nightlight-layer', 'raster-opacity', viirsOpacity);
         }
     }, [map, isLoaded, viirsOpacity]);
 
-    // Handle source location selection (Step 1)
+    useEffect(() => {
+        setIsSidebarOpen(false);
+    }, [setIsSidebarOpen]);
+
+    useEffect(() => {
+        if (scanStep === 'idle') {
+            setScanStep('selecting_source');
+        }
+    }, [scanStep]);
+
     useEffect(() => {
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
@@ -421,7 +350,6 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
             });
-            // Auto advance to next step
             setScanStep('selecting_target');
         };
 
@@ -429,24 +357,21 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         map.on('click', handleSourceClick);
 
         return () => {
-            // Only reset cursor if we strictly leave the selection modes, 
-            // but 'selecting_target' also needs crosshair.
-            // Simplification: just reset here, next effect picks it up.
             map.getCanvas().style.cursor = '';
             map.off('click', handleSourceClick);
         };
     }, [map, isLoaded, scanStep]);
 
-    // Handle target location selection (Step 2)
     useEffect(() => {
         if (!map || !isLoaded || scanStep !== 'selecting_target') return;
+
+        setPreviewDeltaTheta(null);
 
         const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
             setTargetLocation({
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
             });
-            // Auto advance to next step
             setScanStep('adjusting_angle');
         };
 
@@ -459,14 +384,12 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         };
     }, [map, isLoaded, scanStep]);
 
-    // Handle Angle Adjustment (Step 3) - Interactive
     useEffect(() => {
         if (!map || !isLoaded || scanStep !== 'adjusting_angle' || !sourceLocation || !targetLocation) {
             if (previewDeltaTheta !== null) setPreviewDeltaTheta(null);
             return;
         }
 
-        // Initialize preview with current config
         if (previewDeltaTheta === null) {
             setPreviewDeltaTheta(fanConfig.deltaTheta);
         }
@@ -477,7 +400,6 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             let diff = Math.abs(mouseAz - centerAz);
             if (diff > 180) diff = 360 - diff;
 
-            // Dynamic angle: 2 * diff
             const newDelta = Math.max(1, Math.min(360, diff * 2));
             setPreviewDeltaTheta(newDelta);
         };
@@ -485,13 +407,12 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         const handleClick = () => {
             if (previewDeltaTheta !== null) {
                 setFanConfig(prev => ({ ...prev, deltaTheta: previewDeltaTheta }));
-                executeScan({ deltaTheta: previewDeltaTheta }); // Pass override
+                executeScan({ deltaTheta: previewDeltaTheta });
             }
         };
 
         map.on('mousemove', handleMouseMove);
         map.on('click', handleClick);
-        // Using cursor: alias to indicate interactive adjustment
         map.getCanvas().style.cursor = 'col-resize';
 
         return () => {
@@ -499,7 +420,8 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
         };
-    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig]);
+    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta]);
+
 
     // Execute Scan Logic (Manual Trigger)
     const executeScan = async (configOverride?: Partial<FanConfig>) => {
@@ -507,11 +429,10 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
             setError("観測点が設定されていません");
             return;
         }
-
-        // Clear previous results
-        onProfileChange(null);
-        setRayResult(null);
-        setFanRayResults([]);
+        if (isFanMode && !targetLocation) {
+            setError("目標点が設定されていません");
+            return;
+        }
 
         setLoading(true);
         setError(null);
@@ -519,16 +440,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
         try {
             const currentConfig = { ...fanConfig, ...configOverride };
 
-            if (isFanMode && currentConfig.fullScan) {
-                // 360° Scan
-                const testEndpoint = calculateEndpoint(sourceLocation, 0, 100);
-                const testProfile = await fetchProfile(sourceLocation, testEndpoint, 10);
-                const elevA = testProfile.elev_m[0];
-                const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
-
-                const results = await generate360Rays(sourceLocation, currentConfig, sightAngle, sourceZ0);
-                setFanRayResults(results);
-            } else if (isFanMode && targetLocation) {
+            if (isFanMode && targetLocation) {
                 // Fan Scan
                 const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
                 const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
@@ -562,8 +474,7 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                 onProfileChange(profile);
             }
 
-            // Mark complete
-            setScanStep('scanning'); // or 'complete'
+            setScanStep('selecting_target');
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to execute scan';
             setError(message);
@@ -775,43 +686,33 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     ? { deltaTheta: previewDeltaTheta, rayCount: fanConfig.rayCount }
                     : null
                 }
+                preferPreview={scanStep === 'adjusting_angle'}
+                showTargetRing={false}
+                targetRingState={undefined}
             />
 
-            {/* Sidebar toggle button (Always visible when collapsed) */}
-            {!isSidebarOpen && (
-                <button
-                    aria-label="Expand panel"
-                    onClick={() => setIsSidebarOpen(true)}
-                    className="absolute top-4 left-4 z-50 p-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-lg text-white shadow-lg hover:bg-black/80 transition-all"
-                >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
-                </button>
-            )}
-
-            {/* Sidebar Overlay */}
-            <div
-                className={`absolute top-0 left-0 h-full w-80 bg-black/80 backdrop-blur-md border-r border-white/10 transition-transform duration-300 z-10 p-4 overflow-y-auto ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-                    }`}
+            <LayerMenu
+                isOpen={isSidebarOpen}
+                onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
             >
-                {/* Header */}
-                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
-                    <h1 className="text-lg font-bold text-white tracking-wider flex items-center gap-2">
-                        <span className="text-xl">🌃</span> Tokyo Nightview
-                    </h1>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-bold text-white">探索パネル</h2>
                     <button
-                        onClick={() => setIsSidebarOpen(false)}
-                        className="p-1 hover:bg-white/10 rounded-full transition-colors"
+                        type="button"
+                        onClick={() => {
+                            setScanStep('selecting_source');
+                            setSourceLocation(null);
+                            setTargetLocation(null);
+                            setFanRayResults([]);
+                        }}
+                        className="text-xs text-red-300 hover:text-red-200 underline"
                     >
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        Reset
                     </button>
                 </div>
 
                 {geoError && (
-                    <div className="text-amber-400 text-sm mb-2 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
+                    <div className="text-amber-400 text-sm mb-3 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
                         <div className="font-semibold">📍 位置情報が利用できません</div>
                         <div className="mt-1 text-xs text-amber-200">
                             {geoError.includes('denied') || geoError.includes('permission') ? (
@@ -826,49 +727,22 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     </div>
                 )}
 
-                {/* Workflow Status / Wizard UI */}
                 <div className="mb-4 space-y-2">
                     <div className="flex justify-between items-center bg-white/10 p-2 rounded">
                         <span className={`text-xs font-bold ${scanStep === 'idle' ? 'text-gray-400' : 'text-blue-400'}`}>
                             Step: {scanStep.replace('_', ' ').toUpperCase()}
                         </span>
-                        {scanStep !== 'idle' && (
-                            <button
-                                onClick={() => {
-                                    setScanStep('idle');
-                                    setSourceLocation(null);
-                                    setTargetLocation(null);
-                                    setFanRayResults([]);
-                                }}
-                                className="text-xs text-red-400 hover:text-red-300 underline"
-                            >
-                                Reset
-                            </button>
-                        )}
                     </div>
 
-                    {scanStep === 'idle' && (
-                        <button
-                            onClick={() => {
-                                setScanStep('selecting_source');
-                                setIsSidebarOpen(true);
-                                setFanConfig(prev => ({ ...prev, fullScan: false }));
-                            }}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow-lg text-sm transition-all"
-                        >
-                            📡 新規スキャン開始
-                        </button>
-                    )}
-
                     {scanStep === 'selecting_source' && (
-                        <div className="p-3 bg-blue-900/40 border border-blue-500/30 rounded text-sm text-blue-200 animate-pulse">
-                            📍 地図をクリックして <b>観測点(Source)</b> を決定してください
+                        <div className="p-2 bg-blue-900/40 border border-blue-500/30 rounded text-xs text-blue-200 animate-pulse">
+                            📍 地図をクリックして <b>観測点</b> を決定してください
                         </div>
                     )}
 
                     {scanStep === 'selecting_target' && (
-                        <div className="p-3 bg-green-900/40 border border-green-500/30 rounded text-sm text-green-200 animate-pulse">
-                            🎯 地図をクリックして <b>目標点(Target)</b> を決定してください
+                        <div className="p-2 bg-green-900/40 border border-green-500/30 rounded text-xs text-green-200 animate-pulse">
+                            🎯 地図をクリックして <b>目標点</b> を決定してください
                         </div>
                     )}
 
@@ -887,20 +761,6 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                     )}
                 </div>
 
-                {sourceLocation && (
-                    <div className="text-sm text-gray-200 mb-2">
-                        {/* Status text removed as per request */}
-                    </div>
-                )}
-
-                {targetLocation && (
-                    <div className="text-sm text-gray-200 mb-2">
-                        {/* Status text removed as per request */}
-                    </div>
-                )}
-
-
-                {/* Status Info */}
                 <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
                     <div className="text-xs text-gray-300 space-y-1">
                         {loading ? (
@@ -927,10 +787,19 @@ export function MapView({ onProfileChange, onRayResultChange, profile, hoveredIn
                         )}
                     </div>
                 </div>
-            </div>
+            </LayerMenu>
 
             {/* Current Location Button & Settings Button */}
             <div className="absolute bottom-6 right-6 flex gap-4 md:bottom-8 md:right-8 z-50 pointer-events-auto">
+                <button
+                    onClick={() => executeScan()}
+                    disabled={!canExecuteScan}
+                    className={`group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-lg shadow-lg px-4 py-3 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center cursor-pointer ${canExecuteScan ? '' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                    aria-label="スキャン実行"
+                >
+                    <span className="text-sm font-bold">▶ Scan</span>
+                </button>
                 {/* Settings Button */}
                 <button
                     onClick={() => {

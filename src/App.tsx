@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
-import { MapView } from './components/map/MapView';
-import { ProfileChart } from './components/profile/ProfileChart';
+import { useCallback, useEffect, useState } from 'react';
+import { MapViewAnalyze } from './components/map/MapViewAnalyze';
+import { MapViewExplore } from './components/map/MapViewExplore';
 import type { ProfileResponse } from './types/profile';
 
 // Ray collision result type
@@ -13,12 +13,19 @@ type RayResult = {
 };
 
 function App() {
+    const [mode, setMode] = useState<'explore' | 'analyze'>('explore');
     const [profile, setProfile] = useState<ProfileResponse | null>(null);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
     const [zoomLevel, setZoomLevel] = useState<number | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+    useEffect(() => {
+        if (mode === 'explore') {
+            setIsSidebarOpen(true);
+        }
+    }, [mode]);
 
     const handleProfileChange = useCallback((p: ProfileResponse | null) => {
         setProfile(p);
@@ -45,32 +52,47 @@ function App() {
         <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
             {/* Full Screen Map */}
             <div className="absolute inset-0">
-                <MapView
-                    onProfileChange={handleProfileChange}
-                    onRayResultChange={handleRayResultChange}
-                    profile={profile}
-                    hoveredIndex={hoveredIndex}
-                    clickedIndex={clickedIndex}
-                    onZoomChange={handleZoomChange}
-                    isSidebarOpen={isSidebarOpen}
-                    setIsSidebarOpen={setIsSidebarOpen}
-                />
+                {mode === 'explore' ? (
+                    <MapViewExplore
+                        onProfileChange={handleProfileChange}
+                        onRayResultChange={handleRayResultChange}
+                        profile={profile}
+                        hoveredIndex={hoveredIndex}
+                        clickedIndex={clickedIndex}
+                        onZoomChange={handleZoomChange}
+                        isSidebarOpen={isSidebarOpen}
+                        setIsSidebarOpen={setIsSidebarOpen}
+                    />
+                ) : (
+                    <MapViewAnalyze />
+                )}
             </div>
 
-            {/* Floating Profile Overlay */}
-            {/* Positioned at bottom center with dynamic margin based on sidebar */}
-            <div
-                className={`absolute bottom-6 right-4 h-64 z-20 pointer-events-none flex justify-center transition-all duration-300 ease-in-out`}
-                style={{ left: isSidebarOpen ? '21rem' : '1rem' }} // 20rem (Sidebar) + 1rem (Gap) vs 1rem
-            >
-                <div className="w-full h-full pointer-events-auto max-w-6xl">
-                    <ProfileChart
-                        profile={profile}
-                        onHover={handleHover}
-                        onClick={handleClick}
-                        occlusionDistance={rayResult?.distance || null}
-                        zoomLevel={zoomLevel}
-                    />
+            {/* Mode Toggle (Center) */}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+                <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/70 p-1 shadow-lg backdrop-blur-md">
+                    <button
+                        type="button"
+                        aria-pressed={mode === 'explore'}
+                        onClick={() => setMode('explore')}
+                        className={`px-4 py-1 text-sm font-semibold rounded-full transition-colors ${mode === 'explore'
+                            ? 'bg-white/20 text-white'
+                            : 'text-gray-300 hover:text-white'
+                            }`}
+                    >
+                        探索
+                    </button>
+                    <button
+                        type="button"
+                        aria-pressed={mode === 'analyze'}
+                        onClick={() => setMode('analyze')}
+                        className={`px-4 py-1 text-sm font-semibold rounded-full transition-colors ${mode === 'analyze'
+                            ? 'bg-white/20 text-white'
+                            : 'text-gray-300 hover:text-white'
+                            }`}
+                    >
+                        解析
+                    </button>
                 </div>
             </div>
         </div>

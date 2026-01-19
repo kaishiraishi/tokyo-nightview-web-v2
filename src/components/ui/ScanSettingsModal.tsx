@@ -5,7 +5,6 @@ type FanConfig = {
     deltaTheta: number;
     rayCount: number;
     maxRange: number;
-    fullScan: boolean;
 };
 
 type ScanSettingsModalProps = {
@@ -93,38 +92,23 @@ export function ScanSettingsModal({
                 {/* 2. Ray Density / Count */}
                 <div>
                     <div className="text-sm font-semibold text-gray-300 mb-2">レイ密度 (スキャン本数)</div>
-                    {fanConfig.fullScan ? (
-                        <div className="flex gap-2">
+                    <div className="flex gap-2">
+                        {[
+                            { label: '粗 (9本)', val: FAN_PRESETS.RAY_COUNT.COARSE },
+                            { label: '中 (13本)', val: FAN_PRESETS.RAY_COUNT.MEDIUM },
+                            { label: '細 (17本)', val: FAN_PRESETS.RAY_COUNT.FINE },
+                            { label: '標準 (36本)', val: 36 },
+                            { label: '高密度 (72本)', val: 72 },
+                        ].map((opt) => (
                             <button
-                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 36 })}
-                                className={`flex-1 py-2 text-xs rounded transition-colors ${fanConfig.rayCount === 36 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
+                                key={opt.val}
+                                onClick={() => setFanConfig({ ...fanConfig, rayCount: opt.val })}
+                                className={`flex-1 py-2 text-xs rounded transition-colors ${fanConfig.rayCount === opt.val ? 'bg-green-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
                             >
-                                標準 (36本)
+                                {opt.label}
                             </button>
-                            <button
-                                onClick={() => setFanConfig({ ...fanConfig, rayCount: 72 })}
-                                className={`flex-1 py-2 text-xs rounded transition-colors ${fanConfig.rayCount === 72 ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
-                            >
-                                高密度 (72本)
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex gap-2">
-                            {[
-                                { label: '粗 (9本)', val: FAN_PRESETS.RAY_COUNT.COARSE },
-                                { label: '中 (13本)', val: FAN_PRESETS.RAY_COUNT.MEDIUM },
-                                { label: '細 (17本)', val: FAN_PRESETS.RAY_COUNT.FINE },
-                            ].map((opt) => (
-                                <button
-                                    key={opt.val}
-                                    onClick={() => setFanConfig({ ...fanConfig, rayCount: opt.val })}
-                                    className={`flex-1 py-2 text-xs rounded transition-colors ${fanConfig.rayCount === opt.val ? 'bg-green-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
-                                >
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                        ))}
+                    </div>
                 </div>
 
                 {/* 3. Max Range */}
