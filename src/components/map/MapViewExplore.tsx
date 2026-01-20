@@ -3,36 +3,61 @@ import maplibregl from 'maplibre-gl';
 import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
-import { LayerMenu } from './LayerMenu';
 import { fetchProfile } from '../../lib/api/dsmApi';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import { CurrentLocationButton } from '../ui/CurrentLocationButton';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-import { ScanSettingsModal } from '../ui/ScanSettingsModal';
-import { SIGHT_ANGLE_PRESETS, FAN_PRESETS } from '../../config/scanConstants';
 import type { FanConfig, ScanStep } from './types';
 
 const NORTH_THRESHOLD_DEG = 5;
+const SIGHT_ANGLE_PRESETS = {
+    HORIZONTAL: 0,
+};
+const FAN_PRESETS = {
+    DELTA_THETA: {
+        MEDIUM: 60,
+    },
+    MAX_RANGE: 2000,
+};
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
     onRayResultChange: (result: RayResult | null) => void;
+    onScanStatusChange: (status: {
+        scanStep: ScanStep;
+        loading: boolean;
+        error: string | null;
+        rayResult: RayResult | null;
+        previewDeltaTheta: number | null;
+        deltaTheta: number;
+        fanStats: { total: number; blocked: number; clear: number };
+    }) => void;
+    onResetReady: (resetFn: () => void) => void;
     profile: ProfileResponse | null;
     hoveredIndex: number | null;
     clickedIndex: number | null;
     onZoomChange: (zoom: number) => void;
-    isSidebarOpen: boolean;
-    setIsSidebarOpen: (isOpen: boolean) => void;
 };
 
-export function MapViewExplore({ onProfileChange, onRayResultChange, profile, hoveredIndex, clickedIndex, onZoomChange, isSidebarOpen, setIsSidebarOpen }: MapViewProps) {
+export function MapViewExplore({
+    onProfileChange,
+    onRayResultChange,
+    onScanStatusChange,
+    onResetReady,
+    profile,
+    hoveredIndex,
+    clickedIndex,
+    onZoomChange,
+}: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
 
     // Modal State
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const settingsPanelRef = useRef<HTMLDivElement | null>(null);
+    const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const [sourceLocation, setSourceLocation] = useState<LngLat | null>(null);
     const [targetLocation, setTargetLocation] = useState<LngLat | null>(null);
@@ -54,13 +79,13 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
     // const [isCollapsed, setIsCollapsed] = useState(false); // Lifted to App.tsx
 
     // Sight angle state
-    const [sightAngle, setSightAngle] = useState<number>(SIGHT_ANGLE_PRESETS.HORIZONTAL);
+    const [sightAngle] = useState<number>(SIGHT_ANGLE_PRESETS.HORIZONTAL);
 
     // Ray result state (replaces rayEndPoint and isLineClear)
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
 
     // Fan mode state
-    const [isFanMode, setIsFanMode] = useState<boolean>(true);
+    const [isFanMode] = useState<boolean>(true);
     const [fanConfig, setFanConfig] = useState<FanConfig>({
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
         rayCount: 36,
@@ -68,9 +93,12 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
 
-    // VIIRS layer opacity state
-    const [viirsOpacity, setViirsOpacity] = useState<number>(0.7);
-    const canExecuteScan = !loading && !!sourceLocation && !!targetLocation;
+    // VIIRS controls
+    const [viirsEnabled, setViirsEnabled] = useState(true);
+    const [viirsOpacity, setViirsOpacity] = useState<number>(0.2);
+    const [isViirsPanelOpen, setIsViirsPanelOpen] = useState(false);
+    const viirsPanelRef = useRef<HTMLDivElement | null>(null);
+    const viirsButtonRef = useRef<HTMLButtonElement | null>(null);
 
     // Ray-based occlusion detection with sight angle α
     function findFirstOcclusion(
@@ -333,8 +361,65 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
     }, [map, isLoaded, viirsOpacity]);
 
     useEffect(() => {
-        setIsSidebarOpen(false);
-    }, [setIsSidebarOpen]);
+        if (!map || !isLoaded) return;
+        if (!map.isStyleLoaded?.() || !map.getStyle?.()) return;
+
+        const layer = map.getLayer?.('viirs-nightlight-layer') ?? null;
+
+        if (layer && map.setLayoutProperty) {
+            map.setLayoutProperty('viirs-nightlight-layer', 'visibility', viirsEnabled ? 'visible' : 'none');
+        }
+    }, [map, isLoaded, viirsEnabled]);
+
+    useEffect(() => {
+        if (!isSettingsOpen) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (settingsPanelRef.current?.contains(target)) return;
+            if (settingsButtonRef.current?.contains(target)) return;
+            setIsSettingsOpen(false);
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsSettingsOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isSettingsOpen]);
+
+    useEffect(() => {
+        if (!isViirsPanelOpen) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (viirsPanelRef.current?.contains(target)) return;
+            if (viirsButtonRef.current?.contains(target)) return;
+            setIsViirsPanelOpen(false);
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsViirsPanelOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isViirsPanelOpen]);
 
     useEffect(() => {
         if (scanStep === 'idle') {
@@ -343,9 +428,46 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
     }, [scanStep]);
 
     useEffect(() => {
+        const blocked = fanRayResults.filter((r) => r.hit).length;
+        const clear = fanRayResults.length - blocked;
+
+        onScanStatusChange({
+            scanStep,
+            loading,
+            error,
+            rayResult,
+            previewDeltaTheta,
+            deltaTheta: fanConfig.deltaTheta,
+            fanStats: {
+                total: fanRayResults.length,
+                blocked,
+                clear,
+            },
+        });
+    }, [scanStep, loading, error, rayResult, fanRayResults, onScanStatusChange]);
+
+    useEffect(() => {
+        const reset = () => {
+            setScanStep('idle');
+            setSourceLocation(null);
+            setTargetLocation(null);
+            setFanRayResults([]);
+            setPreviewDeltaTheta(null);
+            setRayResult(null);
+            setError(null);
+            setLoading(false);
+            onRayResultChange(null);
+            onProfileChange(null);
+        };
+
+        onResetReady(() => reset);
+    }, [onResetReady]);
+
+    useEffect(() => {
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
-        const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
+        const handleSourceDoubleClick = (e: maplibregl.MapMouseEvent) => {
+            e.preventDefault();
             setSourceLocation({
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
@@ -354,11 +476,13 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
         };
 
         map.getCanvas().style.cursor = 'crosshair';
-        map.on('click', handleSourceClick);
+        map.doubleClickZoom.disable();
+        map.on('dblclick', handleSourceDoubleClick);
 
         return () => {
             map.getCanvas().style.cursor = '';
-            map.off('click', handleSourceClick);
+            map.off('dblclick', handleSourceDoubleClick);
+            map.doubleClickZoom.enable();
         };
     }, [map, isLoaded, scanStep]);
 
@@ -668,6 +792,8 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
         );
     };
 
+    // Double-click is reserved for source selection.
+
     return (
         <div className="relative w-full h-full">
             <div ref={containerRef} className="w-full h-full" />
@@ -687,140 +813,130 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
                     : null
                 }
                 preferPreview={scanStep === 'adjusting_angle'}
-                showTargetRing={false}
-                targetRingState={undefined}
+                showTargetRing={scanStep === 'adjusting_angle'}
+                targetRingState={{
+                    previewDeltaTheta,
+                    setPreviewDeltaTheta,
+                    onCommitDeltaTheta: (value) => {
+                        setFanConfig((prev) => ({ ...prev, deltaTheta: value }));
+                        executeScan({ deltaTheta: value });
+                    },
+                }}
             />
 
-            <LayerMenu
-                isOpen={isSidebarOpen}
-                onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-            >
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold text-white">探索パネル</h2>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setScanStep('selecting_source');
-                            setSourceLocation(null);
-                            setTargetLocation(null);
-                            setFanRayResults([]);
-                        }}
-                        className="text-xs text-red-300 hover:text-red-200 underline"
+            {/* Bottom Right Controls */}
+            <div className="absolute bottom-6 right-6 flex items-end gap-4 md:bottom-8 md:right-8 z-50 pointer-events-auto">
+                <button
+                    ref={settingsButtonRef}
+                    type="button"
+                    onClick={() => setIsSettingsOpen((prev) => !prev)}
+                    className="group bg-black/60 backdrop-blur-md border border-yellow-300/60 text-white rounded-full shadow-lg p-3 hover:bg-white/10 hover:border-yellow-200 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                    aria-label="設定"
+                    aria-pressed={isSettingsOpen}
+                >
+                    <span className="text-xl">⚙️</span>
+                </button>
+                {isSettingsOpen && (
+                    <div
+                        ref={settingsPanelRef}
+                        className="absolute right-20 bottom-0 w-56 rounded-xl border border-white/10 bg-black/70 p-3 shadow-lg backdrop-blur-md"
                     >
-                        Reset
-                    </button>
-                </div>
-
-                {geoError && (
-                    <div className="text-amber-400 text-sm mb-3 p-2 bg-amber-900/50 border border-amber-500/30 rounded">
-                        <div className="font-semibold">📍 位置情報が利用できません</div>
-                        <div className="mt-1 text-xs text-amber-200">
-                            {geoError.includes('denied') || geoError.includes('permission') ? (
-                                <>
-                                    ブラウザの設定で位置情報を許可してください。<br />
-                                    または地図中心を基準点として使用します。
-                                </>
-                            ) : (
-                                <>位置情報エラー: {geoError}</>
-                            )}
+                        <div className="text-xs text-white/60">Ray Count</div>
+                        <div className="mt-2 flex items-center justify-between text-sm text-white/80">
+                            <span>{fanConfig.rayCount}</span>
+                            <span className="text-white/60">rays</span>
+                        </div>
+                        <div className="mt-3 text-xs text-white/60">Ray Spacing</div>
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs font-semibold">
+                            {[
+                                { label: '詳細', value: 10 },
+                                { label: 'ノーマル', value: 30 },
+                                { label: 'あらめ', value: 60 },
+                            ].map((preset) => (
+                                <button
+                                    key={preset.value}
+                                    type="button"
+                                    onClick={() => {
+                                        setFanConfig((prev) => ({
+                                            ...prev,
+                                            deltaTheta: preset.value,
+                                        }));
+                                    }}
+                                    className={`rounded-full px-2 py-1 transition-colors ${
+                                        fanConfig.deltaTheta === preset.value
+                                            ? 'bg-yellow-400 text-black'
+                                            : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                                    }`}
+                                >
+                                    {preset.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-1 text-[11px] text-white/50">
+                            {fanConfig.deltaTheta}° 間隔
                         </div>
                     </div>
                 )}
 
-                <div className="mb-4 space-y-2">
-                    <div className="flex justify-between items-center bg-white/10 p-2 rounded">
-                        <span className={`text-xs font-bold ${scanStep === 'idle' ? 'text-gray-400' : 'text-blue-400'}`}>
-                            Step: {scanStep.replace('_', ' ').toUpperCase()}
-                        </span>
-                    </div>
-
-                    {scanStep === 'selecting_source' && (
-                        <div className="p-2 bg-blue-900/40 border border-blue-500/30 rounded text-xs text-blue-200 animate-pulse">
-                            📍 地図をクリックして <b>観測点</b> を決定してください
-                        </div>
-                    )}
-
-                    {scanStep === 'selecting_target' && (
-                        <div className="p-2 bg-green-900/40 border border-green-500/30 rounded text-xs text-green-200 animate-pulse">
-                            🎯 地図をクリックして <b>目標点</b> を決定してください
-                        </div>
-                    )}
-
-                    {scanStep === 'adjusting_angle' && (
-                        <div className="space-y-2">
-                            <div className="p-2 bg-purple-900/40 border border-purple-500/30 rounded text-xs text-purple-200">
-                                📐 扇形の角度・範囲を調整し、実行してください
+                <div className="relative flex flex-col items-end gap-2">
+                    <button
+                        ref={viirsButtonRef}
+                        type="button"
+                        onClick={() => setIsViirsPanelOpen((prev) => !prev)}
+                        className="group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-full shadow-lg h-11 w-11 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                        aria-label="VIIRS設定"
+                        aria-pressed={isViirsPanelOpen}
+                    >
+                        <span className="text-lg">🗺️</span>
+                    </button>
+                    {isViirsPanelOpen && (
+                        <div
+                            ref={viirsPanelRef}
+                            className="absolute right-0 bottom-14 w-56 rounded-xl border border-white/10 bg-black/70 p-3 shadow-lg backdrop-blur-md"
+                        >
+                            <div className="flex items-center justify-between text-sm text-white/80">
+                                <span>VIIRS</span>
+                                <label className="flex items-center gap-2 text-xs text-white/60">
+                                    <span>{viirsEnabled ? 'ON' : 'OFF'}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={viirsEnabled}
+                                        onChange={(event) => setViirsEnabled(event.target.checked)}
+                                        className="h-4 w-4 accent-yellow-400"
+                                    />
+                                </label>
                             </div>
-                            <button
-                                onClick={() => executeScan()}
-                                className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow-lg text-sm transition-all"
-                            >
-                                ▶ スキャン実行
-                            </button>
+                            <div className={`mt-3 ${viirsEnabled ? '' : 'opacity-50'}`}>
+                                <div className="flex items-center justify-between text-xs text-white/60">
+                                    <span>Opacity</span>
+                                    <span className="text-white/80">
+                                        {Math.round(viirsOpacity * 100)}%
+                                    </span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    value={Math.round(viirsOpacity * 100)}
+                                    onChange={(event) => {
+                                        setViirsOpacity(Number(event.target.value) / 100);
+                                    }}
+                                    className="mt-2 w-full accent-yellow-400"
+                                    disabled={!viirsEnabled}
+                                />
+                            </div>
                         </div>
                     )}
+                    <CurrentLocationButton
+                        onClick={() => {
+                            console.log('Location clicked');
+                            handleResetLocate();
+                        }}
+                        isNorthUp={isNorthUp}
+                        disabled={isLocating}
+                        className="relative bottom-auto right-auto border-none shadow-none cursor-pointer rounded-full"
+                    />
                 </div>
-
-                <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
-                    <div className="text-xs text-gray-300 space-y-1">
-                        {loading ? (
-                            <div className="text-blue-400 animate-pulse">Scanning terrain...</div>
-                        ) : error ? (
-                            <div className="text-red-400">Error: {error}</div>
-                        ) : fanRayResults.length > 0 ? (
-                            <>
-                                <div className="flex justify-between">
-                                    <span>総レイ数:</span>
-                                    <span className="font-mono">{fanRayResults.length}</span>
-                                </div>
-                                <div className="flex justify-between text-red-300">
-                                    <span>遮蔽 (Blocked):</span>
-                                    <span className="font-mono">{fanRayResults.filter(r => r.hit).length}</span>
-                                </div>
-                                <div className="flex justify-between text-green-300">
-                                    <span>通過 (Clear):</span>
-                                    <span className="font-mono">{fanRayResults.filter(r => !r.hit).length}</span>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="text-gray-500 italic text-center">Ready to scan</div>
-                        )}
-                    </div>
-                </div>
-            </LayerMenu>
-
-            {/* Current Location Button & Settings Button */}
-            <div className="absolute bottom-6 right-6 flex gap-4 md:bottom-8 md:right-8 z-50 pointer-events-auto">
-                <button
-                    onClick={() => executeScan()}
-                    disabled={!canExecuteScan}
-                    className={`group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-lg shadow-lg px-4 py-3 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center cursor-pointer ${canExecuteScan ? '' : 'opacity-50 cursor-not-allowed'
-                        }`}
-                    aria-label="スキャン実行"
-                >
-                    <span className="text-sm font-bold">▶ Scan</span>
-                </button>
-                {/* Settings Button */}
-                <button
-                    onClick={() => {
-                        console.log('Settings clicked');
-                        setIsSettingsOpen(true);
-                    }}
-                    className="group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-lg shadow-lg p-3 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center cursor-pointer"
-                    aria-label="スキャン設定"
-                >
-                    <span className="text-xl">⚙️</span>
-                </button>
-
-                <CurrentLocationButton
-                    onClick={() => {
-                        console.log('Location clicked');
-                        handleResetLocate();
-                    }}
-                    isNorthUp={isNorthUp}
-                    disabled={isLocating}
-                    className="relative bottom-auto right-auto border-none shadow-none cursor-pointer"
-                />
             </div>
             {locateError && (
                 <div className="absolute bottom-24 right-6 md:right-8 bg-red-900/80 text-white text-xs px-2 py-1 rounded backdrop-blur border border-red-500/30 z-20">
@@ -828,18 +944,6 @@ export function MapViewExplore({ onProfileChange, onRayResultChange, profile, ho
                 </div>
             )}
 
-            {/* Settings Modal */}
-            <ScanSettingsModal
-                isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
-                sightAngle={sightAngle}
-                setSightAngle={setSightAngle}
-                viirsOpacity={viirsOpacity}
-                setViirsOpacity={setViirsOpacity}
-                fanConfig={fanConfig}
-                setFanConfig={setFanConfig}
-                rayResult={rayResult}
-            />
         </div>
     );
 }

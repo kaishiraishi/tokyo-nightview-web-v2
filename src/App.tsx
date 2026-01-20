@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { TopRightHud } from './components/hud/TopRightHud';
 import { MapViewAnalyze } from './components/map/MapViewAnalyze';
 import { MapViewExplore } from './components/map/MapViewExplore';
+import type { ScanStep } from './components/map/types';
 import type { ProfileResponse } from './types/profile';
 
 // Ray collision result type
@@ -12,6 +14,20 @@ type RayResult = {
     reason: 'clear' | 'building' | 'terrain';
 };
 
+type ScanStatus = {
+    scanStep: ScanStep;
+    loading: boolean;
+    error: string | null;
+    rayResult: RayResult | null;
+    previewDeltaTheta: number | null;
+    deltaTheta: number;
+    fanStats: {
+        total: number;
+        blocked: number;
+        clear: number;
+    };
+};
+
 function App() {
     const [mode, setMode] = useState<'explore' | 'analyze'>('explore');
     const [profile, setProfile] = useState<ProfileResponse | null>(null);
@@ -19,13 +35,16 @@ function App() {
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
     const [zoomLevel, setZoomLevel] = useState<number | null>(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-    useEffect(() => {
-        if (mode === 'explore') {
-            setIsSidebarOpen(true);
-        }
-    }, [mode]);
+    const [resetScan, setResetScan] = useState<() => void>(() => {});
+    const [scanStatus, setScanStatus] = useState<ScanStatus>({
+        scanStep: 'idle',
+        loading: false,
+        error: null,
+        rayResult: null,
+        previewDeltaTheta: null,
+        deltaTheta: 0,
+        fanStats: { total: 0, blocked: 0, clear: 0 },
+    });
 
     const handleProfileChange = useCallback((p: ProfileResponse | null) => {
         setProfile(p);
@@ -56,44 +75,29 @@ function App() {
                     <MapViewExplore
                         onProfileChange={handleProfileChange}
                         onRayResultChange={handleRayResultChange}
+                        onScanStatusChange={setScanStatus}
+                        onResetReady={setResetScan}
                         profile={profile}
                         hoveredIndex={hoveredIndex}
                         clickedIndex={clickedIndex}
                         onZoomChange={handleZoomChange}
-                        isSidebarOpen={isSidebarOpen}
-                        setIsSidebarOpen={setIsSidebarOpen}
                     />
                 ) : (
                     <MapViewAnalyze />
                 )}
             </div>
 
-            {/* Mode Toggle (Center) */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
-                <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/70 p-1 shadow-lg backdrop-blur-md">
-                    <button
-                        type="button"
-                        aria-pressed={mode === 'explore'}
-                        onClick={() => setMode('explore')}
-                        className={`px-4 py-1 text-sm font-semibold rounded-full transition-colors ${mode === 'explore'
-                            ? 'bg-white/20 text-white'
-                            : 'text-gray-300 hover:text-white'
-                            }`}
-                    >
-                        探索
-                    </button>
-                    <button
-                        type="button"
-                        aria-pressed={mode === 'analyze'}
-                        onClick={() => setMode('analyze')}
-                        className={`px-4 py-1 text-sm font-semibold rounded-full transition-colors ${mode === 'analyze'
-                            ? 'bg-white/20 text-white'
-                            : 'text-gray-300 hover:text-white'
-                            }`}
-                    >
-                        解析
-                    </button>
-                </div>
+            <div className="absolute top-4 left-4 z-50 pointer-events-auto">
+                <TopRightHud
+                    mode={mode}
+                    onModeChange={setMode}
+                    profile={profile}
+                    onProfileHover={handleHover}
+                    onProfileClick={handleClick}
+                    occlusionDistance={rayResult?.distance ?? null}
+                    scanStatus={scanStatus}
+                    onResetScan={resetScan}
+                />
             </div>
         </div>
     );

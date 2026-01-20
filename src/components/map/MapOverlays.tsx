@@ -401,10 +401,24 @@ export function MapOverlays({
                 const pCenter = drawPreviewRay(centerAzimuth, true);
                 const pRight = drawPreviewRay(centerAzimuth + deltaTheta / 2, false);
 
-                rimSegs = [
-                    { source: pLeft, target: pCenter, color: [80, 220, 255, 120] },
-                    { source: pCenter, target: pRight, color: [80, 220, 255, 120] }
-                ];
+                // Arc along preview radius instead of triangular rim
+                const arcSegs: {
+                    source: [number, number, number];
+                    target: [number, number, number];
+                    color: [number, number, number, number];
+                }[] = [];
+                const steps = 24;
+                for (let i = 0; i < steps; i++) {
+                    const t0 = i / steps;
+                    const t1 = (i + 1) / steps;
+                    const az0 = centerAzimuth - deltaTheta / 2 + deltaTheta * t0;
+                    const az1 = centerAzimuth - deltaTheta / 2 + deltaTheta * t1;
+                    const a0 = drawPreviewRay(az0, false);
+                    const a1 = drawPreviewRay(az1, false);
+                    arcSegs.push({ source: a0, target: a1, color: [80, 220, 255, 140] });
+                }
+
+                rimSegs = arcSegs;
 
                 // Add center anchor red
                 anchors.push({ position: pCenter, color: [239, 68, 68], radius: 10 });
@@ -607,47 +621,6 @@ export function MapOverlays({
     }, [map, showTargetRing, sourceLocation, targetLocation]);
 
     return (
-        <div className="absolute inset-0 pointer-events-none z-30">
-            {showTargetRing && ringPosition && (
-                <div
-                    className="absolute w-36 h-36 -translate-x-1/2 -translate-y-1/2 pointer-events-auto"
-                    style={{ left: ringPosition.x, top: ringPosition.y }}
-                    onPointerDown={(event) => {
-                        if (!targetRingState) return;
-                        isDraggingRef.current = true;
-                        pointerIdRef.current = event.pointerId;
-                        event.currentTarget.setPointerCapture(event.pointerId);
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }}
-                    onPointerMove={(event) => {
-                        if (!targetRingState) return;
-                        if (pointerIdRef.current !== event.pointerId) return;
-                        handlePointerMove(event);
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }}
-                    onPointerUp={(event) => {
-                        if (pointerIdRef.current !== event.pointerId) return;
-                        event.currentTarget.releasePointerCapture(event.pointerId);
-                        pointerIdRef.current = null;
-                        handlePointerUp();
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }}
-                    onPointerCancel={(event) => {
-                        if (pointerIdRef.current !== event.pointerId) return;
-                        event.currentTarget.releasePointerCapture(event.pointerId);
-                        pointerIdRef.current = null;
-                        handlePointerUp();
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }}
-                >
-                    <div className="absolute inset-0 rounded-full border-2 border-emerald-300/70 shadow-[0_0_24px_rgba(16,185,129,0.35)]" />
-                    <div className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-emerald-300 shadow-md" />
-                </div>
-            )}
-        </div>
+        <div className="absolute inset-0 pointer-events-none z-30" />
     );
 }

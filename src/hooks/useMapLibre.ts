@@ -50,7 +50,7 @@ function addVIIRSNightLight(map: maplibregl.Map) {
             type: 'raster',
             source: VIIRS_SOURCE_ID,
             paint: {
-                'raster-opacity': 0.7,
+                'raster-opacity': 0.2,
             },
         });
         console.log('[VIIRS] Layer added');
