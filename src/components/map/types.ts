@@ -1,9 +1,14 @@
 export type MapMode = 'explore' | 'analyze';
 
 export type FanConfig = {
-    deltaTheta: number;
     rayCount: number;
     maxRange: number;
 };
 
-export type ScanStep = 'idle' | 'selecting_source' | 'selecting_target' | 'adjusting_angle' | 'scanning' | 'complete';
+export type ScanStep =
+    | 'idle'
+    | 'selecting_source'
+    | 'north_preview'
+    | 'adjusting_range'
+    | 'scanning'
+    | 'complete';

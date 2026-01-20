@@ -14,8 +14,6 @@ type TopRightHudProps = {
         loading: boolean;
         error: string | null;
         rayResult: RayResult | null;
-        previewDeltaTheta: number | null;
-        deltaTheta: number;
         fanStats: {
             total: number;
             blocked: number;
@@ -111,17 +109,27 @@ export function TopRightHud({
                             {
                                 key: 'selecting_source',
                                 label: '観測点を決定',
-                                help: 'ダブルクリックで観測点',
+                                help: 'シングルクリックで観測点',
                             },
                             {
-                                key: 'selecting_target',
-                                label: '目標点を決定',
-                                help: 'シングルクリックで目標点',
+                                key: 'north_preview',
+                                label: '2D真北',
+                                help: '北向きの俯瞰に調整中',
                             },
                             {
-                                key: 'adjusting_angle',
-                                label: '角度を調整',
-                                help: 'マウス移動で角度調整 → クリックで確定',
+                                key: 'adjusting_range',
+                                label: '半径を調整',
+                                help: 'マウス移動で半径調整 → クリックで確定',
+                            },
+                            {
+                                key: 'scanning',
+                                label: '360°スキャン',
+                                help: '自動でスキャンを実行',
+                            },
+                            {
+                                key: 'complete',
+                                label: 'スキャン完了',
+                                help: '結果を表示中',
                             },
                         ].map((step, index) => {
                             const isActive = scanStatus.scanStep === step.key;
@@ -131,8 +139,10 @@ export function TopRightHud({
                                 index <
                                     [
                                         'selecting_source',
-                                        'selecting_target',
-                                        'adjusting_angle',
+                                        'north_preview',
+                                        'adjusting_range',
+                                        'scanning',
+                                        'complete',
                                     ].indexOf(scanStatus.scanStep);
 
                             return (
@@ -154,11 +164,6 @@ export function TopRightHud({
                                     <div className="flex-1">
                                         <div className="text-white/90">{step.label}</div>
                                         <div className="text-[11px] text-white/50">{step.help}</div>
-                                        {step.key === 'adjusting_angle' && isActive && (
-                                            <div className="mt-1 text-[11px] text-white/70">
-                                                Angle: {Math.round(scanStatus.previewDeltaTheta ?? scanStatus.deltaTheta)}°
-                                            </div>
-                                        )}
                                         {scanStatus.error && isActive && (
                                             <div className="mt-1 text-[11px] text-red-400">
                                                 Error: {scanStatus.error}

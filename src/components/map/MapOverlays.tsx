@@ -1,55 +1,32 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef } from 'react';
 import type maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
-import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
-
-type TargetRingState = {
-    previewDeltaTheta: number | null;
-    setPreviewDeltaTheta: (value: number | null) => void;
-    onCommitDeltaTheta: (value: number) => void;
-};
+import type { LngLat, ProfileResponse, FanRayResult } from '../../types/profile';
 
 type MapOverlaysProps = {
     map: maplibregl.Map | null;
     sourceLocation: LngLat | null;
     currentLocation: LngLat | null;
-    targetLocation: LngLat | null;
-    rayResult: RayResult | null;
     profile: ProfileResponse | null;
     hoveredIndex: number | null;
     isFanMode: boolean;
     fanRayResults: FanRayResult[];
-    previewFanConfig?: {
-        deltaTheta: number;
-        rayCount: number;
-    } | null;
-    preferPreview?: boolean;
-    showTargetRing?: boolean;
-    targetRingState?: TargetRingState;
+    previewRangeM?: number | null;
 };
 
 export function MapOverlays({
     map,
     sourceLocation,
     currentLocation,
-    targetLocation,
-    rayResult,
     profile,
     hoveredIndex,
     isFanMode,
     fanRayResults,
-    previewFanConfig,
-    preferPreview,
-    showTargetRing,
-    targetRingState,
+    previewRangeM,
 }: MapOverlaysProps) {
     const overlayRef = useRef<MapboxOverlay | null>(null);
-    const isDraggingRef = useRef(false);
-    const pointerIdRef = useRef<number | null>(null);
-    const [ringPosition, setRingPosition] = useState<{ x: number; y: number } | null>(null);
-    const targetRingStateRef = useRef<TargetRingState | null>(null);
 
     // Initialize Deck.gl Overlay
     useEffect(() => {
@@ -82,47 +59,27 @@ export function MapOverlays({
         };
     }, [map]);
 
-    useEffect(() => {
-        targetRingStateRef.current = targetRingState ?? null;
-    }, [targetRingState]);
-
-    const calculateAzimuth = (start: LngLat, end: LngLat): number => {
+    const calculateEndpoint = (start: LngLat, azimuthDeg: number, distanceM: number): LngLat => {
+        const R = 6371000;
+        const bearing = (azimuthDeg * Math.PI) / 180;
         const lat1 = (start.lat * Math.PI) / 180;
-        const lat2 = (end.lat * Math.PI) / 180;
-        const deltaLng = ((end.lng - start.lng) * Math.PI) / 180;
+        const lng1 = (start.lng * Math.PI) / 180;
 
-        const y = Math.sin(deltaLng) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) -
-            Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+        const lat2 = Math.asin(
+            Math.sin(lat1) * Math.cos(distanceM / R) +
+            Math.cos(lat1) * Math.sin(distanceM / R) * Math.cos(bearing)
+        );
 
-        const bearing = Math.atan2(y, x);
-        return ((bearing * 180) / Math.PI + 360) % 360;
+        const lng2 = lng1 + Math.atan2(
+            Math.sin(bearing) * Math.sin(distanceM / R) * Math.cos(lat1),
+            Math.cos(distanceM / R) - Math.sin(lat1) * Math.sin(lat2)
+        );
+
+        return {
+            lat: (lat2 * 180) / Math.PI,
+            lng: (lng2 * 180) / Math.PI,
+        };
     };
-
-    useEffect(() => {
-        if (!map || !showTargetRing || !sourceLocation) {
-            setRingPosition(null);
-            return;
-        }
-
-        const updatePosition = () => {
-            const pos = map.project([sourceLocation.lng, sourceLocation.lat]);
-            setRingPosition({ x: pos.x, y: pos.y });
-        };
-
-        updatePosition();
-        map.on('move', updatePosition);
-        map.on('zoom', updatePosition);
-        map.on('rotate', updatePosition);
-        map.on('resize', updatePosition);
-
-        return () => {
-            map.off('move', updatePosition);
-            map.off('zoom', updatePosition);
-            map.off('rotate', updatePosition);
-            map.off('resize', updatePosition);
-        };
-    }, [map, showTargetRing, sourceLocation]);
 
     // Update Deck.gl layers (Rays & Hit Points & Anchors)
     useEffect(() => {
@@ -185,7 +142,7 @@ export function MapOverlays({
 
         // Fixed range for gradient normalization (adjustable)
         const RANGE_MIN_M = 100;
-        const RANGE_MAX_M = 2000;
+        const RANGE_MAX_M = 200000;
 
         if (isFanMode) {
             if (!sourceLocation) {
@@ -226,22 +183,29 @@ export function MapOverlays({
                 radius: 12,
             });
 
-            // Draw Target (Red) in Deck if exists
-            if (targetLocation) {
-                const tZ = terrainZ(targetLocation.lng, targetLocation.lat);
-                const targetZ = (tZ ?? (terrainStart ?? 0)) + EPS;
-                anchors.push({
-                    position: [targetLocation.lng, targetLocation.lat, targetZ],
-                    color: [239, 68, 68], // red
-                    radius: 10,
-                });
-            }
-
             const hasResults = fanRayResults.length > 0;
-            const shouldPreview = !!previewFanConfig && preferPreview;
 
+            // --- MODE: PREVIEW (Adjusting range) ---
+            if (previewRangeM && previewRangeM > 0) {
+                const steps = 64;
+                const ringPoints: Array<[number, number, number]> = [];
+                for (let i = 0; i <= steps; i++) {
+                    const az = (i * (360 / steps)) % 360;
+                    const point = calculateEndpoint(sourceLocation, az, previewRangeM);
+                    const tZ = terrainZ(point.lng, point.lat) ?? 0;
+                    ringPoints.push([point.lng, point.lat, tZ + EPS]);
+                }
+
+                for (let i = 0; i < ringPoints.length - 1; i++) {
+                    rimSegs.push({
+                        source: ringPoints[i],
+                        target: ringPoints[i + 1],
+                        color: [80, 220, 255, 160],
+                    });
+                }
+            }
             // --- MODE: RESULTS (Confirmed results exist) ---
-            if (!shouldPreview && hasResults) {
+            else if (hasResults) {
                 const scanMaxRangeM = fanRayResults.reduce((mx, r) => {
                     if (!r.rayGeometry) return mx;
                     const A = { lng: startLng, lat: startLat };
@@ -362,102 +326,6 @@ export function MapOverlays({
                     });
                 }
             }
-            // --- MODE: PREVIEW (No results, interactive adjustment) ---
-            else if (previewFanConfig && targetLocation) {
-                const { deltaTheta } = previewFanConfig;
-
-                const centerAzimuth = ((): number => {
-                    const y = Math.sin((targetLocation.lng - startLng) * Math.PI / 180) * Math.cos(targetLocation.lat * Math.PI / 180);
-                    const x = Math.cos(startLat * Math.PI / 180) * Math.sin(targetLocation.lat * Math.PI / 180) -
-                        Math.sin(startLat * Math.PI / 180) * Math.cos(targetLocation.lat * Math.PI / 180) * Math.cos((targetLocation.lng - startLng) * Math.PI / 180);
-                    return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
-                })();
-
-                const distM = haversineMeters({ lng: startLng, lat: startLat }, { lng: targetLocation.lng, lat: targetLocation.lat });
-
-                const drawPreviewRay = (azimuth: number, isCenter: boolean) => {
-                    const R = 6371000;
-                    const br = azimuth * Math.PI / 180;
-                    const lat1 = startLat * Math.PI / 180;
-                    const lng1 = startLng * Math.PI / 180;
-                    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distM / R) + Math.cos(lat1) * Math.sin(distM / R) * Math.cos(br));
-                    const lng2 = lng1 + Math.atan2(Math.sin(br) * Math.sin(distM / R) * Math.cos(lat1), Math.cos(distM / R) - Math.sin(lat1) * Math.sin(lat2));
-                    const endLat = lat2 * 180 / Math.PI;
-                    const endLng = lng2 * 180 / Math.PI;
-
-                    const tZ = terrainZ(endLng, endLat) ?? 0;
-                    const endZ = tZ + EPS;
-
-                    rays.push({
-                        source: [startLng, startLat, startZ],
-                        target: [endLng, endLat, endZ],
-                        color: isCenter ? [255, 255, 255, 100] : [80, 220, 255, 120],
-                    });
-
-                    return [endLng, endLat, endZ] as [number, number, number];
-                };
-
-                const pLeft = drawPreviewRay(centerAzimuth - deltaTheta / 2, false);
-                const pCenter = drawPreviewRay(centerAzimuth, true);
-                const pRight = drawPreviewRay(centerAzimuth + deltaTheta / 2, false);
-
-                // Arc along preview radius instead of triangular rim
-                const arcSegs: {
-                    source: [number, number, number];
-                    target: [number, number, number];
-                    color: [number, number, number, number];
-                }[] = [];
-                const steps = 24;
-                for (let i = 0; i < steps; i++) {
-                    const t0 = i / steps;
-                    const t1 = (i + 1) / steps;
-                    const az0 = centerAzimuth - deltaTheta / 2 + deltaTheta * t0;
-                    const az1 = centerAzimuth - deltaTheta / 2 + deltaTheta * t1;
-                    const a0 = drawPreviewRay(az0, false);
-                    const a1 = drawPreviewRay(az1, false);
-                    arcSegs.push({ source: a0, target: a1, color: [80, 220, 255, 140] });
-                }
-
-                rimSegs = arcSegs;
-
-                // Add center anchor red
-                anchors.push({ position: pCenter, color: [239, 68, 68], radius: 10 });
-            }
-
-        } else if (sourceLocation && targetLocation) {
-            // SINGLE RAY (NO FAN)
-            const tStart = terrainZ(sourceLocation.lng, sourceLocation.lat);
-            const tEnd = terrainZ(targetLocation.lng, targetLocation.lat);
-
-            const startZ = (tStart ?? 0) + H_EYE;
-            const endZ = (tEnd ?? 0) + EPS;
-
-            rays.push({
-                source: [sourceLocation.lng, sourceLocation.lat, startZ],
-                target: [targetLocation.lng, targetLocation.lat, endZ],
-                color: rayResult?.hit ? [239, 68, 68] : [16, 185, 129],
-            });
-
-            anchors.push({ position: [sourceLocation.lng, sourceLocation.lat, startZ], color: [59, 130, 246], radius: 12 });
-            anchors.push({ position: [targetLocation.lng, targetLocation.lat, endZ], color: [239, 68, 68], radius: 10 });
-
-            if (rayResult?.hit && rayResult.hitPoint) {
-                const A = { lng: sourceLocation.lng, lat: sourceLocation.lat };
-                const B = { lng: targetLocation.lng, lat: targetLocation.lat };
-                const H = { lng: rayResult.hitPoint.lng, lat: rayResult.hitPoint.lat };
-
-                const AB = haversineMeters(A, B);
-                const AH = haversineMeters(A, H);
-                const t = AB > 0 ? Math.max(0, Math.min(1, AH / AB)) : 0;
-
-                const hitZ = startZ + t * (endZ - startZ);
-
-                hits.push({
-                    position: [H.lng, H.lat, hitZ + 0.2],
-                    color: [245, 158, 11],
-                    radius: 8,
-                });
-            }
         }
 
         const layers = [
@@ -513,7 +381,7 @@ export function MapOverlays({
         ];
 
         overlayRef.current.setProps({ layers });
-    }, [isFanMode, fanRayResults, rayResult, map, sourceLocation, targetLocation, previewFanConfig]);
+    }, [isFanMode, fanRayResults, map, sourceLocation, previewRangeM]);
 
 
     // Update GeoJSON markers (Source, Target, Current, Hover)
@@ -563,62 +431,7 @@ export function MapOverlays({
                 features,
             });
         }
-    }, [map, sourceLocation, currentLocation, targetLocation, profile, hoveredIndex]);
-
-    const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-        const ringState = targetRingStateRef.current;
-        if (!map || !sourceLocation || !targetLocation || !ringState || !isDraggingRef.current) return;
-
-        const rect = map.getContainer().getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
-        const lngLat = map.unproject([x, y]);
-
-        const centerAz = calculateAzimuth(sourceLocation, targetLocation);
-        const mouseAz = calculateAzimuth(sourceLocation, { lng: lngLat.lng, lat: lngLat.lat });
-        let diff = Math.abs(mouseAz - centerAz);
-        if (diff > 180) diff = 360 - diff;
-
-        const newDelta = Math.max(1, Math.min(360, diff * 2));
-        if (ringState.previewDeltaTheta !== newDelta) {
-            ringState.setPreviewDeltaTheta(newDelta);
-        }
-    };
-
-    const handlePointerUp = () => {
-        const ringState = targetRingStateRef.current;
-        if (!ringState || !isDraggingRef.current) return;
-
-        isDraggingRef.current = false;
-        if (ringState.previewDeltaTheta !== null) {
-            ringState.onCommitDeltaTheta(ringState.previewDeltaTheta);
-        }
-    };
-
-    useEffect(() => {
-        if (!map || !showTargetRing || !sourceLocation || !targetLocation) return;
-
-        const handleMouseMove = (event: maplibregl.MapMouseEvent) => {
-            const ringState = targetRingStateRef.current;
-            if (!ringState) return;
-            const lngLat = event.lngLat;
-            const centerAz = calculateAzimuth(sourceLocation, targetLocation);
-            const mouseAz = calculateAzimuth(sourceLocation, { lng: lngLat.lng, lat: lngLat.lat });
-            let diff = Math.abs(mouseAz - centerAz);
-            if (diff > 180) diff = 360 - diff;
-
-            const newDelta = Math.max(1, Math.min(360, diff * 2));
-            if (ringState.previewDeltaTheta !== newDelta) {
-                ringState.setPreviewDeltaTheta(newDelta);
-            }
-        };
-
-        map.on('mousemove', handleMouseMove);
-
-        return () => {
-            map.off('mousemove', handleMouseMove);
-        };
-    }, [map, showTargetRing, sourceLocation, targetLocation]);
+    }, [map, sourceLocation, currentLocation, profile, hoveredIndex]);
 
     return (
         <div className="absolute inset-0 pointer-events-none z-30" />

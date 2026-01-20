@@ -19,8 +19,6 @@ type ScanStatus = {
     loading: boolean;
     error: string | null;
     rayResult: RayResult | null;
-    previewDeltaTheta: number | null;
-    deltaTheta: number;
     fanStats: {
         total: number;
         blocked: number;
@@ -41,8 +39,6 @@ function App() {
         loading: false,
         error: null,
         rayResult: null,
-        previewDeltaTheta: null,
-        deltaTheta: 0,
         fanStats: { total: 0, blocked: 0, clear: 0 },
     });
 

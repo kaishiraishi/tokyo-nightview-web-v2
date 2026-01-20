@@ -18,7 +18,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
     if (!profile) {
         return (
             <div className="w-full h-full bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg flex items-center justify-center">
-                <p className="text-gray-300 font-medium text-sm">地図をクリックしてターゲット地点を選択</p>
+                <p className="text-gray-300 font-medium text-sm">地図をクリックして観測点を決定</p>
             </div>
         );
     }
