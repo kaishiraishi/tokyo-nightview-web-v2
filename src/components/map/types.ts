@@ -6,4 +6,13 @@ export type FanConfig = {
     maxRange: number;
 };
 
-export type ScanStep = 'idle' | 'selecting_source' | 'selecting_target' | 'adjusting_angle' | 'scanning' | 'complete';
+export type ScanMode = '360' | 'fan';
+
+export type ScanStep =
+    | 'idle'
+    | 'selecting_source'
+    | 'selecting_target'
+    | 'adjusting_angle'
+    | 'adjusting_range'
+    | 'scanning'
+    | 'complete';

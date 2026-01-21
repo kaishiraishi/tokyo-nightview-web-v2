@@ -25,6 +25,7 @@ type MapOverlaysProps = {
         deltaTheta: number;
         rayCount: number;
     } | null;
+    previewRangeM?: number | null;
     preferPreview?: boolean;
     showTargetRing?: boolean;
     targetRingState?: TargetRingState;
@@ -41,6 +42,7 @@ export function MapOverlays({
     isFanMode,
     fanRayResults,
     previewFanConfig,
+    previewRangeM,
     preferPreview,
     showTargetRing,
     targetRingState,
@@ -97,6 +99,28 @@ export function MapOverlays({
 
         const bearing = Math.atan2(y, x);
         return ((bearing * 180) / Math.PI + 360) % 360;
+    };
+
+    const calculateEndpoint = (start: LngLat, azimuthDeg: number, distanceM: number): LngLat => {
+        const R = 6371000;
+        const bearing = (azimuthDeg * Math.PI) / 180;
+        const lat1 = (start.lat * Math.PI) / 180;
+        const lng1 = (start.lng * Math.PI) / 180;
+
+        const lat2 = Math.asin(
+            Math.sin(lat1) * Math.cos(distanceM / R) +
+            Math.cos(lat1) * Math.sin(distanceM / R) * Math.cos(bearing)
+        );
+
+        const lng2 = lng1 + Math.atan2(
+            Math.sin(bearing) * Math.sin(distanceM / R) * Math.cos(lat1),
+            Math.cos(distanceM / R) - Math.sin(lat1) * Math.sin(lat2)
+        );
+
+        return {
+            lat: (lat2 * 180) / Math.PI,
+            lng: (lng2 * 180) / Math.PI,
+        };
     };
 
     useEffect(() => {
@@ -240,8 +264,26 @@ export function MapOverlays({
             const hasResults = fanRayResults.length > 0;
             const shouldPreview = !!previewFanConfig && preferPreview;
 
+            if (previewRangeM && previewRangeM > 0) {
+                const steps = 64;
+                const ringPoints: Array<[number, number, number]> = [];
+                for (let i = 0; i <= steps; i++) {
+                    const az = (i * (360 / steps)) % 360;
+                    const point = calculateEndpoint(sourceLocation, az, previewRangeM);
+                    const tZ = terrainZ(point.lng, point.lat) ?? 0;
+                    ringPoints.push([point.lng, point.lat, tZ + EPS]);
+                }
+
+                for (let i = 0; i < ringPoints.length - 1; i++) {
+                    rimSegs.push({
+                        source: ringPoints[i],
+                        target: ringPoints[i + 1],
+                        color: [80, 220, 255, 160],
+                    });
+                }
+            }
             // --- MODE: RESULTS (Confirmed results exist) ---
-            if (!shouldPreview && hasResults) {
+            else if (!shouldPreview && hasResults) {
                 const scanMaxRangeM = fanRayResults.reduce((mx, r) => {
                     if (!r.rayGeometry) return mx;
                     const A = { lng: startLng, lat: startLat };
@@ -513,7 +555,7 @@ export function MapOverlays({
         ];
 
         overlayRef.current.setProps({ layers });
-    }, [isFanMode, fanRayResults, rayResult, map, sourceLocation, targetLocation, previewFanConfig]);
+    }, [isFanMode, fanRayResults, rayResult, map, sourceLocation, targetLocation, previewFanConfig, previewRangeM]);
 
 
     // Update GeoJSON markers (Source, Target, Current, Hover)

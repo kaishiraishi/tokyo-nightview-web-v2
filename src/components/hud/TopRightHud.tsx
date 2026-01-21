@@ -1,10 +1,12 @@
 import { ProfileChart } from '../profile/ProfileChart';
-import type { ScanStep } from '../map/types';
+import type { ScanMode, ScanStep } from '../map/types';
 import type { ProfileResponse, RayResult } from '../../types/profile';
 
 type TopRightHudProps = {
     mode: 'explore' | 'analyze';
     onModeChange: (mode: 'explore' | 'analyze') => void;
+    scanMode: ScanMode;
+    onScanModeChange: (mode: ScanMode) => void;
     profile: ProfileResponse | null;
     onProfileHover: (index: number | null) => void;
     onProfileClick: (index: number) => void;
@@ -28,6 +30,8 @@ type TopRightHudProps = {
 export function TopRightHud({
     mode,
     onModeChange,
+    scanMode,
+    onScanModeChange,
     profile,
     onProfileHover,
     onProfileClick,
@@ -106,8 +110,30 @@ export function TopRightHud({
                         </button>
                     </div>
 
-                    <div className="mt-3 space-y-2 text-xs">
+                    <div className="mt-3 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
                         {[
+                            { key: '360', label: '360Ray' },
+                            { key: 'fan', label: 'FanRay' },
+                        ].map((tab) => (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => onScanModeChange(tab.key as ScanMode)}
+                                aria-pressed={scanMode === tab.key}
+                                className={`flex-1 rounded-full px-3 py-1 font-semibold tracking-wide transition-colors ${
+                                    scanMode === tab.key
+                                        ? 'bg-yellow-400 text-black'
+                                        : 'text-white/70 hover:text-white'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="mt-3 space-y-2 text-xs">
+                        {(scanMode === 'fan'
+                            ? [
                             {
                                 key: 'selecting_source',
                                 label: '観測点を決定',
@@ -123,7 +149,29 @@ export function TopRightHud({
                                 label: '角度を調整',
                                 help: 'マウス移動で角度調整 → クリックで確定',
                             },
-                        ].map((step, index) => {
+                        ]
+                            : [
+                            {
+                                key: 'selecting_source',
+                                label: '観測点を決定',
+                                help: 'ダブルクリックで観測点',
+                            },
+                            {
+                                key: 'adjusting_range',
+                                label: '半径を調整',
+                                help: 'マウス移動で半径調整 → クリックで確定',
+                            },
+                            {
+                                key: 'scanning',
+                                label: '360°スキャン',
+                                help: 'スキャンを実行中',
+                            },
+                            {
+                                key: 'complete',
+                                label: '完了',
+                                help: '結果を表示中',
+                            },
+                        ]).map((step, index) => {
                             const isActive = scanStatus.scanStep === step.key;
                             const isDone =
                                 scanStatus.scanStep !== 'idle' &&
@@ -131,8 +179,9 @@ export function TopRightHud({
                                 index <
                                     [
                                         'selecting_source',
-                                        'selecting_target',
-                                        'adjusting_angle',
+                                        ...(scanMode === 'fan'
+                                            ? ['selecting_target', 'adjusting_angle']
+                                            : ['adjusting_range', 'scanning', 'complete']),
                                     ].indexOf(scanStatus.scanStep);
 
                             return (

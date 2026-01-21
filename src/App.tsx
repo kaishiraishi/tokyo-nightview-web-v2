@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { TopRightHud } from './components/hud/TopRightHud';
 import { MapViewAnalyze } from './components/map/MapViewAnalyze';
 import { MapViewExplore } from './components/map/MapViewExplore';
-import type { ScanStep } from './components/map/types';
+import type { ScanMode, ScanStep } from './components/map/types';
 import type { ProfileResponse } from './types/profile';
 
 // Ray collision result type
@@ -30,6 +30,7 @@ type ScanStatus = {
 
 function App() {
     const [mode, setMode] = useState<'explore' | 'analyze'>('explore');
+    const [scanMode, setScanMode] = useState<ScanMode>('fan');
     const [profile, setProfile] = useState<ProfileResponse | null>(null);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
@@ -77,6 +78,7 @@ function App() {
                         onRayResultChange={handleRayResultChange}
                         onScanStatusChange={setScanStatus}
                         onResetReady={setResetScan}
+                        scanMode={scanMode}
                         profile={profile}
                         hoveredIndex={hoveredIndex}
                         clickedIndex={clickedIndex}
@@ -91,6 +93,8 @@ function App() {
                 <TopRightHud
                     mode={mode}
                     onModeChange={setMode}
+                    scanMode={scanMode}
+                    onScanModeChange={setScanMode}
                     profile={profile}
                     onProfileHover={handleHover}
                     onProfileClick={handleClick}

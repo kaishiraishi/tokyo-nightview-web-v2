@@ -8,7 +8,7 @@ import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../typ
 import { CurrentLocationButton } from '../ui/CurrentLocationButton';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-import type { FanConfig, ScanStep } from './types';
+import type { FanConfig, ScanMode, ScanStep } from './types';
 
 const NORTH_THRESHOLD_DEG = 5;
 const SIGHT_ANGLE_PRESETS = {
@@ -20,6 +20,8 @@ const FAN_PRESETS = {
     },
     MAX_RANGE: 2000,
 };
+const RANGE_MIN_M = 3000;
+const RANGE_MAX_M = 200000;
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
@@ -34,6 +36,7 @@ type MapViewProps = {
         fanStats: { total: number; blocked: number; clear: number };
     }) => void;
     onResetReady: (resetFn: () => void) => void;
+    scanMode: ScanMode;
     profile: ProfileResponse | null;
     hoveredIndex: number | null;
     clickedIndex: number | null;
@@ -45,6 +48,7 @@ export function MapViewExplore({
     onRayResultChange,
     onScanStatusChange,
     onResetReady,
+    scanMode,
     profile,
     hoveredIndex,
     clickedIndex,
@@ -64,6 +68,8 @@ export function MapViewExplore({
     const [scanStep, setScanStep] = useState<ScanStep>('idle');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [scanRangeM, setScanRangeM] = useState<number>(RANGE_MIN_M);
+    const [previewRangeM, setPreviewRangeM] = useState<number | null>(null);
 
     // Interactive Fan Adjustment State
     const [previewDeltaTheta, setPreviewDeltaTheta] = useState<number | null>(null);
@@ -85,7 +91,8 @@ export function MapViewExplore({
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
 
     // Fan mode state
-    const [isFanMode] = useState<boolean>(true);
+    const isFanMode = true;
+    const fanDeltaThetaRef = useRef(FAN_PRESETS.DELTA_THETA.MEDIUM);
     const [fanConfig, setFanConfig] = useState<FanConfig>({
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
         rayCount: 36,
@@ -397,6 +404,23 @@ export function MapViewExplore({
     }, [isSettingsOpen]);
 
     useEffect(() => {
+        if (scanMode === '360') {
+            fanDeltaThetaRef.current = fanConfig.deltaTheta;
+            if (fanConfig.deltaTheta !== 360) {
+                setFanConfig((prev) => ({ ...prev, deltaTheta: 360 }));
+            }
+            return;
+        }
+
+        if (scanMode === 'fan') {
+            const restore = fanDeltaThetaRef.current;
+            if (fanConfig.deltaTheta !== restore) {
+                setFanConfig((prev) => ({ ...prev, deltaTheta: restore }));
+            }
+        }
+    }, [scanMode, fanConfig.deltaTheta]);
+
+    useEffect(() => {
         if (!isViirsPanelOpen) return;
 
         const handlePointerDown = (event: MouseEvent) => {
@@ -453,6 +477,7 @@ export function MapViewExplore({
             setTargetLocation(null);
             setFanRayResults([]);
             setPreviewDeltaTheta(null);
+            setPreviewRangeM(null);
             setRayResult(null);
             setError(null);
             setLoading(false);
@@ -468,11 +493,20 @@ export function MapViewExplore({
 
         const handleSourceDoubleClick = (e: maplibregl.MapMouseEvent) => {
             e.preventDefault();
-            setSourceLocation({
+            const nextSource = {
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
-            });
-            setScanStep('selecting_target');
+            };
+            setSourceLocation(nextSource);
+            if (scanMode === '360') {
+                setTargetLocation(null);
+                setPreviewRangeM(scanRangeM);
+                setFanRayResults([]);
+                setRayResult(null);
+                setScanStep('adjusting_range');
+                return;
+            }
+            setScanStep(scanMode === '360' ? 'complete' : 'selecting_target');
         };
 
         map.getCanvas().style.cursor = 'crosshair';
@@ -484,7 +518,40 @@ export function MapViewExplore({
             map.off('dblclick', handleSourceDoubleClick);
             map.doubleClickZoom.enable();
         };
-    }, [map, isLoaded, scanStep]);
+    }, [map, isLoaded, scanStep, scanMode, scanRangeM]);
+
+    useEffect(() => {
+        if (!map || !isLoaded || scanStep !== 'adjusting_range' || !sourceLocation || scanMode !== '360') return;
+
+        const clampRange = (value: number) =>
+            Math.max(RANGE_MIN_M, Math.min(RANGE_MAX_M, value));
+
+        const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+            const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
+                .distanceTo(new maplibregl.LngLat(e.lngLat.lng, e.lngLat.lat));
+            setPreviewRangeM(clampRange(distance));
+        };
+
+        const handleClick = () => {
+            const nextRange = clampRange(previewRangeM ?? scanRangeM);
+            setScanRangeM(nextRange);
+            setPreviewRangeM(null);
+            setScanStep('scanning');
+            const northTarget = calculateEndpoint(sourceLocation, 0, nextRange);
+            setTargetLocation(northTarget);
+            executeScan({ deltaTheta: 360 }, northTarget);
+        };
+
+        map.on('mousemove', handleMouseMove);
+        map.on('click', handleClick);
+        map.getCanvas().style.cursor = 'col-resize';
+
+        return () => {
+            map.off('mousemove', handleMouseMove);
+            map.off('click', handleClick);
+            map.getCanvas().style.cursor = '';
+        };
+    }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode]);
 
     useEffect(() => {
         if (!map || !isLoaded || scanStep !== 'selecting_target') return;
@@ -492,10 +559,16 @@ export function MapViewExplore({
         setPreviewDeltaTheta(null);
 
         const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
-            setTargetLocation({
+            const nextTarget = {
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
-            });
+            };
+            setTargetLocation(nextTarget);
+            if (scanMode === '360') {
+                setScanStep('scanning');
+                executeScan({ deltaTheta: 360 }, nextTarget);
+                return;
+            }
             setScanStep('adjusting_angle');
         };
 
@@ -506,10 +579,10 @@ export function MapViewExplore({
             map.getCanvas().style.cursor = '';
             map.off('click', handleTargetClick);
         };
-    }, [map, isLoaded, scanStep]);
+    }, [map, isLoaded, scanStep, scanMode]);
 
     useEffect(() => {
-        if (!map || !isLoaded || scanStep !== 'adjusting_angle' || !sourceLocation || !targetLocation) {
+        if (!map || !isLoaded || scanStep !== 'adjusting_angle' || !sourceLocation || !targetLocation || scanMode !== 'fan') {
             if (previewDeltaTheta !== null) setPreviewDeltaTheta(null);
             return;
         }
@@ -530,6 +603,7 @@ export function MapViewExplore({
 
         const handleClick = () => {
             if (previewDeltaTheta !== null) {
+                fanDeltaThetaRef.current = previewDeltaTheta;
                 setFanConfig(prev => ({ ...prev, deltaTheta: previewDeltaTheta }));
                 executeScan({ deltaTheta: previewDeltaTheta });
             }
@@ -544,16 +618,17 @@ export function MapViewExplore({
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
         };
-    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta]);
+    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode]);
 
 
     // Execute Scan Logic (Manual Trigger)
-    const executeScan = async (configOverride?: Partial<FanConfig>) => {
+    const executeScan = async (configOverride?: Partial<FanConfig>, targetOverride?: LngLat) => {
         if (!sourceLocation) {
             setError("観測点が設定されていません");
             return;
         }
-        if (isFanMode && !targetLocation) {
+        const activeTarget = targetOverride ?? targetLocation;
+        if (isFanMode && !activeTarget) {
             setError("目標点が設定されていません");
             return;
         }
@@ -564,34 +639,34 @@ export function MapViewExplore({
         try {
             const currentConfig = { ...fanConfig, ...configOverride };
 
-            if (isFanMode && targetLocation) {
+            if (isFanMode && activeTarget) {
                 // Fan Scan
                 const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
+                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
                 const distanceM = start.distanceTo(end);
                 const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
 
-                const centerProfile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
+                const centerProfile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
                 onProfileChange(centerProfile);
 
                 const elevA = centerProfile.elev_m[0];
                 const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
 
-                const results = await generateFanRays(sourceLocation, targetLocation, currentConfig, sightAngle, sourceZ0);
+                const results = await generateFanRays(sourceLocation, activeTarget, currentConfig, sightAngle, sourceZ0);
                 setFanRayResults(results);
 
                 const centerIndex = Math.floor(currentConfig.rayCount / 2);
                 const centerResult = results[centerIndex];
                 setRayResult(centerResult);
                 onRayResultChange(centerResult);
-            } else if (targetLocation) {
+            } else if (activeTarget) {
                 // Single Ray
                 const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                const end = new maplibregl.LngLat(targetLocation.lng, targetLocation.lat);
+                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
                 const distanceM = start.distanceTo(end);
                 const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
 
-                const profile = await fetchProfile(sourceLocation, targetLocation, sampleCount);
+                const profile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
                 const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
                 setRayResult(result);
                 onRayResultChange(result);
@@ -812,6 +887,7 @@ export function MapViewExplore({
                     ? { deltaTheta: previewDeltaTheta, rayCount: fanConfig.rayCount }
                     : null
                 }
+                previewRangeM={scanMode === '360' && scanStep === 'adjusting_range' ? previewRangeM : null}
                 preferPreview={scanStep === 'adjusting_angle'}
                 showTargetRing={scanStep === 'adjusting_angle'}
                 targetRingState={{
@@ -856,12 +932,13 @@ export function MapViewExplore({
                                 <button
                                     key={preset.value}
                                     type="button"
-                                    onClick={() => {
-                                        setFanConfig((prev) => ({
-                                            ...prev,
-                                            deltaTheta: preset.value,
-                                        }));
-                                    }}
+                                            onClick={() => {
+                                                fanDeltaThetaRef.current = preset.value;
+                                                setFanConfig((prev) => ({
+                                                    ...prev,
+                                                    deltaTheta: preset.value,
+                                                }));
+                                            }}
                                     className={`rounded-full px-2 py-1 transition-colors ${
                                         fanConfig.deltaTheta === preset.value
                                             ? 'bg-yellow-400 text-black'
