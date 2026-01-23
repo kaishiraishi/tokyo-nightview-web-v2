@@ -1,8 +1,9 @@
 node_modules/
 dist/
 .vite/
-viirs*tiles/
-public/viirs*tiles/
+viirs_heat_tiles/
+public/viirs_heat_tiles/
+public/viirs_value_tiles/
 tile_DSM/
 *.log
 .DS_Store
