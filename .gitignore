@@ -5,6 +5,13 @@ tile_DSM/
 viirs_heat_tiles/
 public/viirs_heat_tiles
 
+# Logs
+*.log
+
+# OS files
+.DS_Store
+**/.DS_Store
+
 # Optional: ignore node_modules and build outputs
 node_modules/
 dist/

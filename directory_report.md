@@ -136,3 +136,13 @@ Vite production build output. Generally treated as generated artifacts; not hand
 - Profile chart is removed from `App.tsx` rendering, but profile state still exists.
 - Map overlays rely on deck.gl and MapLibre with terrain + PLATEAU + VIIRS layers configured in `useMapLibre.ts`.
 
+## Recent Updates (Codex)
+- Added FEED-style “みつける” mode UI: pill toggle in `TopRightHud.tsx`, helper text, and lucide icons (Search/Sparkles).
+- Introduced `UserProfileCard.tsx` and integrated profile view toggle; timeline-style “最近見つけた夜景” with single-line vertical timeline.
+- Map behavior: initial view fits Tokyo bounds; geolocation fly-to retained; terrain source sanitized to avoid `scheme: 'tms'` issues.
+- “みつける” mode now disables scan interactions; resets scan state on mode switch; shows a posts list card instead of STATUS in `TopRightHud.tsx`.
+- Posts system (Phase0): `src/data/mockPosts.ts` with 10 Tokyo/West Tokyo posts; markers and popups rendered on map.
+- Popups reworked to be always-on “caption only,” expand on hover, and auto-expand on high zoom; map hover uses feature-state to scale markers smoothly.
+- Popup styling consolidated in `src/index.css` (`night-popup`), with padding moved to `.night-popup-card` to avoid image/text misalignment.
+- Zoom performance improved by only updating popup expansion on threshold changes.
+- Image handling: added resize workflow `scripts/resize-images.mjs` + `npm run resize:images` (sharp) and switched mock posts to `src/data/resized/` images; local resized assets generated under `src/data/resized/`.

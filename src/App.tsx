@@ -72,21 +72,18 @@ function App() {
         <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
             {/* Full Screen Map */}
             <div className="absolute inset-0">
-                {mode === 'explore' ? (
                     <MapViewExplore
                         onProfileChange={handleProfileChange}
                         onRayResultChange={handleRayResultChange}
                         onScanStatusChange={setScanStatus}
                         onResetReady={setResetScan}
+                        mode={mode}
                         scanMode={scanMode}
                         profile={profile}
                         hoveredIndex={hoveredIndex}
                         clickedIndex={clickedIndex}
-                        onZoomChange={handleZoomChange}
-                    />
-                ) : (
-                    <MapViewAnalyze />
-                )}
+                    onZoomChange={handleZoomChange}
+                />
             </div>
 
             <div className="absolute top-4 left-4 z-50 pointer-events-auto">

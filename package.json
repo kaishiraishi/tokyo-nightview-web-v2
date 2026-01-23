@@ -9,7 +9,8 @@
         "dev:all": "concurrently -k -n web,api -c auto \"vite\" \"cd tools/dsm-api && ./run.sh\"",
         "build": "tsc && vite build",
         "preview": "vite preview",
-        "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+        "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+        "resize:images": "node scripts/resize-images.mjs"
     },
     "dependencies": {
         "@deck.gl/core": "^9.2.5",
@@ -17,6 +18,8 @@
         "@deck.gl/layers": "^9.2.5",
         "@deck.gl/mapbox": "^9.2.5",
         "@loaders.gl/3d-tiles": "^4.3.4",
+        "@luma.gl/constants": "^9.2.6",
+        "lucide-react": "^0.562.0",
         "maplibre-gl": "^5.0.0",
         "maplibre-gl-gsi-terrain": "^2.3.0",
         "pmtiles": "^4.3.2",
@@ -35,6 +38,7 @@
         "eslint-plugin-react-hooks": "^5.0.0",
         "eslint-plugin-react-refresh": "^0.4.14",
         "postcss": "^8.4.49",
+        "sharp": "^0.33.5",
         "tailwindcss": "^3.4.17",
         "typescript": "^5.6.3",
         "vite": "^6.0.3"

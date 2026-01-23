@@ -4,11 +4,13 @@ import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
 import { fetchProfile } from '../../lib/api/dsmApi';
+import { buildViirsPoints, clearViirsCache, type ViirsPoint } from '../../lib/viirsSampler';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import { CurrentLocationButton } from '../ui/CurrentLocationButton';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import type { FanConfig, ScanMode, ScanStep } from './types';
+import { MOCK_POSTS, type Post } from '../../data/mockPosts';
 
 const NORTH_THRESHOLD_DEG = 5;
 const SIGHT_ANGLE_PRESETS = {
@@ -22,6 +24,7 @@ const FAN_PRESETS = {
 };
 const RANGE_MIN_M = 3000;
 const RANGE_MAX_M = 200000;
+const VIIRS_SAMPLE_Z = 10;
 
 type MapViewProps = {
     onProfileChange: (profile: ProfileResponse | null) => void;
@@ -36,6 +39,7 @@ type MapViewProps = {
         fanStats: { total: number; blocked: number; clear: number };
     }) => void;
     onResetReady: (resetFn: () => void) => void;
+    mode: 'explore' | 'analyze';
     scanMode: ScanMode;
     profile: ProfileResponse | null;
     hoveredIndex: number | null;
@@ -48,6 +52,7 @@ export function MapViewExplore({
     onRayResultChange,
     onScanStatusChange,
     onResetReady,
+    mode,
     scanMode,
     profile,
     hoveredIndex,
@@ -70,6 +75,7 @@ export function MapViewExplore({
     const [error, setError] = useState<string | null>(null);
     const [scanRangeM, setScanRangeM] = useState<number>(RANGE_MIN_M);
     const [previewRangeM, setPreviewRangeM] = useState<number | null>(null);
+    const [viirsPoints, setViirsPoints] = useState<ViirsPoint[]>([]);
 
     // Interactive Fan Adjustment State
     const [previewDeltaTheta, setPreviewDeltaTheta] = useState<number | null>(null);
@@ -80,6 +86,7 @@ export function MapViewExplore({
     const [isLocating, setIsLocating] = useState(false);
     const [locateError, setLocateError] = useState<string | null>(null);
     const hasAutoSetSourceRef = useRef(false);
+    const hasInitialFlyRef = useRef(false);
 
     const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
     // const [isCollapsed, setIsCollapsed] = useState(false); // Lifted to App.tsx
@@ -99,6 +106,12 @@ export function MapViewExplore({
         maxRange: FAN_PRESETS.MAX_RANGE,
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
+    const postsPopupCloseTimerRef = useRef<number | null>(null);
+    const hoveredPostIdRef = useRef<string | number | null>(null);
+    const postPopupsRef = useRef<Map<string, maplibregl.Popup>>(new Map());
+    const postPopupExpandedRef = useRef<Map<string, boolean>>(new Map());
+    const isZoomExpandedRef = useRef<boolean | null>(null);
+    const POSTS_IMAGE_ZOOM_THRESHOLD = 13;
 
     // VIIRS controls
     const [viirsEnabled, setViirsEnabled] = useState(true);
@@ -106,6 +119,8 @@ export function MapViewExplore({
     const [isViirsPanelOpen, setIsViirsPanelOpen] = useState(false);
     const viirsPanelRef = useRef<HTMLDivElement | null>(null);
     const viirsButtonRef = useRef<HTMLButtonElement | null>(null);
+    const viirsUpdateTimerRef = useRef<number | null>(null);
+    const viirsRequestIdRef = useRef(0);
 
     // Ray-based occlusion detection with sight angle α
     function findFirstOcclusion(
@@ -236,7 +251,7 @@ export function MapViewExplore({
     }
 
     // Calculate endpoint given start point, azimuth (degrees), and distance (meters)
-    function calculateEndpoint(start: LngLat, azimuthDeg: number, distanceM: number): LngLat {
+function calculateEndpoint(start: LngLat, azimuthDeg: number, distanceM: number): LngLat {
         const R = 6371000; // Earth radius in meters
         const bearing = (azimuthDeg * Math.PI) / 180;
         const lat1 = (start.lat * Math.PI) / 180;
@@ -252,11 +267,41 @@ export function MapViewExplore({
             Math.cos(distanceM / R) - Math.sin(lat1) * Math.sin(lat2)
         );
 
-        return {
-            lat: (lat2 * 180) / Math.PI,
-            lng: (lng2 * 180) / Math.PI,
-        };
-    }
+    return {
+        lat: (lat2 * 180) / Math.PI,
+        lng: (lng2 * 180) / Math.PI,
+    };
+}
+
+function escapeHtml(s: string) {
+    return s
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function buildPostPopupHtml(post: Post, expanded: boolean) {
+    const caption = escapeHtml(post.caption ?? '');
+    const placeName = escapeHtml(post.location.placeName ?? '');
+    const areaText = post.location.area ? `・${escapeHtml(post.location.area)}` : '';
+    const authorName = post.author?.name ? `<div class="night-popup-author">@${escapeHtml(post.author.name)}</div>` : '';
+    const photoUrl = post.photos?.[0]?.url ?? '';
+
+    return `
+      <div class="night-popup-card">
+        ${
+            expanded && photoUrl
+                ? `<img class="night-popup-img" src="${photoUrl}" alt="" loading="lazy" decoding="async" width="240" height="132" />`
+                : ''
+        }
+        <div class="night-popup-caption">${caption}</div>
+        ${expanded ? `<div class="night-popup-meta">${placeName}${areaText}</div>` : ''}
+        ${expanded ? authorName : ''}
+      </div>
+    `;
+}
 
     // Generate fan of rays and calculate occlusion for each
     async function generateFanRays(
@@ -355,27 +400,121 @@ export function MapViewExplore({
         }
     }, [currentLocation, sourceLocation]);
 
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+        if (hasInitialFlyRef.current) return;
+        hasInitialFlyRef.current = true;
+
+        map.flyTo({
+            center: [139.77, 35.68],
+            zoom: 14,
+            pitch: 60,
+            bearing: -20,
+            duration: 1200,
+        });
+    }, [map, isLoaded]);
+
     // Update VIIRS layer opacity
+    // （ラスタ自体は非表示にするが、UI連動を残す場合はコメントアウト、完全に消す場合は削除）
+    /*
     useEffect(() => {
         if (!map || !isLoaded) return;
-        if (!map.isStyleLoaded?.() || !map.getStyle?.()) return;
-
-        const layer = map.getLayer?.('viirs-nightlight-layer') ?? null;
-
-        if (layer && map.setPaintProperty) {
-            map.setPaintProperty('viirs-nightlight-layer', 'raster-opacity', viirsOpacity);
-        }
-    }, [map, isLoaded, viirsOpacity]);
+        // ... (以下、ラスタ表示に関わるuseEffectを無効化・削除)
+    */
 
     useEffect(() => {
         if (!map || !isLoaded) return;
-        if (!map.isStyleLoaded?.() || !map.getStyle?.()) return;
-
-        const layer = map.getLayer?.('viirs-nightlight-layer') ?? null;
-
-        if (layer && map.setLayoutProperty) {
-            map.setLayoutProperty('viirs-nightlight-layer', 'visibility', viirsEnabled ? 'visible' : 'none');
+        if (!viirsEnabled) {
+            setViirsPoints([]);
+            return;
         }
+
+        let isActive = true;
+        let prevStride: number | null = null;
+
+    const update = async () => {
+        const requestId = ++viirsRequestIdRef.current;
+        const bounds = map.getBounds();
+        const currentZoom = map.getZoom();
+
+        // ズームレベルに応じてサンプリングパラメータを調整
+        // ズームアウトするほど stride を大きく、maxPoints を小さくして間引く
+        let stride: number;
+        let maxPoints: number;
+        let maxPointsPerTile: number;
+        let emit: number;
+
+        if (currentZoom >= 14) {
+            // 高ズーム: 高密度
+            stride = 1;
+            maxPoints = 300000;
+            maxPointsPerTile = 15000;
+            emit = 8;
+        } else if (currentZoom >= 12) {
+            // 中ズーム: 標準密度
+            stride = 2;
+            maxPoints = 200000;
+            maxPointsPerTile = 12000;
+            emit = 6;
+        } else if (currentZoom >= 10) {
+            // 低ズーム: 低密度
+            stride = 4;
+            maxPoints = 150000;
+            maxPointsPerTile = 6000;
+            emit = 4;
+        } else {
+            // 超低ズーム: 最低密度
+            stride = 8;
+            maxPoints = 80000;
+            maxPointsPerTile = 3000;
+            emit = 3;
+        }
+
+        // strideが変わった場合はキャッシュをクリア
+        if (prevStride !== null && prevStride !== stride) {
+            console.log('[VIIRS] stride changed, clearing cache:', prevStride, '->', stride);
+            clearViirsCache();
+        }
+        prevStride = stride;
+
+        console.log('[VIIRS update] zoom:', currentZoom.toFixed(1), { stride, maxPoints, maxPointsPerTile, emit });
+
+        const points = await buildViirsPoints(bounds, VIIRS_SAMPLE_Z, {
+            stride,
+            threshold: 0.02,
+            emit,
+            gamma: 1.2,
+            maxPoints,
+            maxPointsPerTile,
+            heightScale: 80,
+        });
+            if (!isActive) return;
+            if (requestId !== viirsRequestIdRef.current) return;
+            setViirsPoints(points);
+        };
+
+        const scheduleUpdate = () => {
+            if (viirsUpdateTimerRef.current !== null) {
+                window.clearTimeout(viirsUpdateTimerRef.current);
+            }
+            viirsUpdateTimerRef.current = window.setTimeout(() => {
+                void update();
+            }, 150);
+        };
+
+        scheduleUpdate();
+        map.on('moveend', scheduleUpdate);
+        map.on('zoomend', scheduleUpdate);
+
+        return () => {
+            isActive = false;
+            map.off('moveend', scheduleUpdate);
+            map.off('zoomend', scheduleUpdate);
+            if (viirsUpdateTimerRef.current !== null) {
+                window.clearTimeout(viirsUpdateTimerRef.current);
+                viirsUpdateTimerRef.current = null;
+            }
+        };
     }, [map, isLoaded, viirsEnabled]);
 
     useEffect(() => {
@@ -402,6 +541,246 @@ export function MapViewExplore({
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [isSettingsOpen]);
+
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+
+        if (!map.getSource('posts')) {
+            map.addSource('posts', {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: [],
+                },
+            });
+        }
+
+        if (!map.getLayer('posts-layer')) {
+            map.addLayer({
+                id: 'posts-layer',
+                type: 'circle',
+                source: 'posts',
+                paint: {
+                    'circle-radius': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        11,
+                        6,
+                    ],
+                    'circle-color': '#f59e0b',
+                    'circle-stroke-width': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        3,
+                        2,
+                    ],
+                    'circle-stroke-color': '#111827',
+                    'circle-radius-transition': { duration: 140, delay: 0 },
+                    'circle-stroke-width-transition': { duration: 140, delay: 0 },
+                },
+            });
+        }
+    }, [map, isLoaded]);
+
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+
+        const source = map.getSource('posts') as maplibregl.GeoJSONSource | undefined;
+        if (source) {
+            source.setData({
+                type: 'FeatureCollection',
+                features: MOCK_POSTS.map((post) => ({
+                    type: 'Feature',
+                    id: post.id,
+                    geometry: {
+                        type: 'Point',
+                        coordinates: [post.location.lng, post.location.lat],
+                    },
+                    properties: {
+                        postId: post.id,
+                        caption: post.caption,
+                        photoUrl: post.photos?.[0]?.url ?? '',
+                        placeName: post.location.placeName ?? '',
+                        area: post.location.area ?? '',
+                        authorName: post.author?.name ?? '',
+                    },
+                })),
+            });
+        }
+
+        const visibility = mode === 'analyze' ? 'visible' : 'none';
+        if (map.getLayer('posts-layer')) {
+            map.setLayoutProperty('posts-layer', 'visibility', visibility);
+        }
+    }, [map, isLoaded, mode]);
+
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+        if (!map.getLayer('posts-layer')) return;
+
+        const clearCloseTimer = () => {
+            if (postsPopupCloseTimerRef.current != null) {
+                window.clearTimeout(postsPopupCloseTimerRef.current);
+                postsPopupCloseTimerRef.current = null;
+            }
+        };
+
+        const setHover = (id: string | number | null, nextState: boolean) => {
+            if (!map.getSource('posts')) return;
+
+            if (hoveredPostIdRef.current != null && hoveredPostIdRef.current !== id) {
+                map.setFeatureState(
+                    { source: 'posts', id: hoveredPostIdRef.current },
+                    { hover: false }
+                );
+                hoveredPostIdRef.current = null;
+            }
+
+            if (id == null) return;
+
+            map.setFeatureState({ source: 'posts', id }, { hover: nextState });
+            hoveredPostIdRef.current = nextState ? id : null;
+        };
+
+        const setPostPopupExpanded = (id: string | number, expanded: boolean) => {
+            const popup = postPopupsRef.current.get(String(id));
+            if (!popup) return;
+
+            const prev = postPopupExpandedRef.current.get(String(id));
+            if (prev === expanded) return;
+
+            const post = MOCK_POSTS.find((item) => item.id === String(id));
+            if (!post) return;
+
+            popup.setHTML(buildPostPopupHtml(post, expanded));
+            postPopupExpandedRef.current.set(String(id), expanded);
+        };
+
+        const shouldShowImage = () => (map.getZoom?.() ?? 0) >= POSTS_IMAGE_ZOOM_THRESHOLD;
+
+        const collapseActivePopup = () => {
+            const id = hoveredPostIdRef.current;
+            if (id == null) return;
+            setPostPopupExpanded(id, shouldShowImage());
+            setHover(id, false);
+        };
+
+        const scheduleClose = () => {
+            clearCloseTimer();
+            postsPopupCloseTimerRef.current = window.setTimeout(() => {
+                collapseActivePopup();
+            }, 180);
+        };
+
+        if (mode === 'analyze') {
+            isZoomExpandedRef.current = shouldShowImage();
+            for (const post of MOCK_POSTS) {
+                let popup = postPopupsRef.current.get(post.id);
+                if (!popup) {
+                    const expanded = shouldShowImage();
+                    popup = new maplibregl.Popup({
+                        closeButton: false,
+                        closeOnClick: false,
+                        closeOnMove: false,
+                        offset: 12,
+                        anchor: 'bottom',
+                        className: 'night-popup',
+                    })
+                        .setLngLat([post.location.lng, post.location.lat])
+                        .setHTML(buildPostPopupHtml(post, expanded))
+                        .addTo(map);
+
+                    postPopupsRef.current.set(post.id, popup);
+                    postPopupExpandedRef.current.set(post.id, expanded);
+
+                    const el = popup.getElement();
+                    el.addEventListener('mouseenter', () => {
+                        clearCloseTimer();
+                        setHover(post.id, true);
+                    });
+                    el.addEventListener('mouseleave', scheduleClose);
+                    el.addEventListener(
+                        'wheel',
+                        (event) => {
+                            event.preventDefault();
+                            const canvas = map.getCanvas();
+                            canvas.dispatchEvent(new WheelEvent('wheel', event));
+                        },
+                        { passive: false }
+                    );
+                } else {
+                    popup.setLngLat([post.location.lng, post.location.lat]);
+                    if (!popup.isOpen?.()) {
+                        popup.addTo(map);
+                    }
+                }
+            }
+        } else {
+            if (hoveredPostIdRef.current != null) {
+                setHover(hoveredPostIdRef.current, false);
+            }
+            for (const popup of postPopupsRef.current.values()) {
+                popup.remove();
+            }
+            postPopupExpandedRef.current.clear();
+            hoveredPostIdRef.current = null;
+        }
+
+        const handleEnter = (e: maplibregl.MapLayerMouseEvent) => {
+            if (mode !== 'analyze') return;
+            clearCloseTimer();
+
+            const feature = e.features?.[0];
+            if (!feature) return;
+
+            const featureId = feature.id as string | number | undefined;
+            if (featureId != null) {
+                setHover(featureId, true);
+            }
+        };
+
+        const handleCursorEnter = () => {
+            if (mode !== 'analyze') return;
+            map.getCanvas().style.cursor = 'pointer';
+        };
+
+        const handleLeave = () => {
+            map.getCanvas().style.cursor = '';
+            scheduleClose();
+        };
+
+        map.on('mouseenter', 'posts-layer', handleEnter);
+        map.on('mouseenter', 'posts-layer', handleCursorEnter);
+        map.on('mouseleave', 'posts-layer', handleLeave);
+
+        const handleZoom = () => {
+            const expanded = shouldShowImage();
+            if (isZoomExpandedRef.current === expanded) return;
+            isZoomExpandedRef.current = expanded;
+
+            for (const [postId, isExpanded] of postPopupExpandedRef.current.entries()) {
+                if (isExpanded !== expanded) {
+                    setPostPopupExpanded(postId, expanded);
+                }
+            }
+        };
+
+        map.on('zoom', handleZoom);
+
+        return () => {
+            map.off('mouseenter', 'posts-layer', handleEnter);
+            map.off('mouseenter', 'posts-layer', handleCursorEnter);
+            map.off('mouseleave', 'posts-layer', handleLeave);
+            map.off('zoom', handleZoom);
+
+            clearCloseTimer();
+            for (const popup of postPopupsRef.current.values()) {
+                popup.remove();
+            }
+            postPopupsRef.current.clear();
+            postPopupExpandedRef.current.clear();
+        };
+    }, [map, isLoaded, mode]);
 
     useEffect(() => {
         if (scanMode === '360') {
@@ -446,12 +825,14 @@ export function MapViewExplore({
     }, [isViirsPanelOpen]);
 
     useEffect(() => {
+        if (mode !== 'explore') return;
         if (scanStep === 'idle') {
             setScanStep('selecting_source');
         }
-    }, [scanStep]);
+    }, [scanStep, mode]);
 
     useEffect(() => {
+        if (mode !== 'explore') return;
         const blocked = fanRayResults.filter((r) => r.hit).length;
         const clear = fanRayResults.length - blocked;
 
@@ -468,7 +849,7 @@ export function MapViewExplore({
                 clear,
             },
         });
-    }, [scanStep, loading, error, rayResult, fanRayResults, onScanStatusChange]);
+    }, [scanStep, loading, error, rayResult, fanRayResults, onScanStatusChange, mode]);
 
     useEffect(() => {
         const reset = () => {
@@ -489,6 +870,22 @@ export function MapViewExplore({
     }, [onResetReady]);
 
     useEffect(() => {
+        if (mode !== 'analyze') return;
+        setScanStep('idle');
+        setSourceLocation(null);
+        setTargetLocation(null);
+        setFanRayResults([]);
+        setPreviewDeltaTheta(null);
+        setPreviewRangeM(null);
+        setRayResult(null);
+        setError(null);
+        setLoading(false);
+        onRayResultChange(null);
+        onProfileChange(null);
+    }, [mode, onProfileChange, onRayResultChange]);
+
+    useEffect(() => {
+        if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
         const handleSourceDoubleClick = (e: maplibregl.MapMouseEvent) => {
@@ -518,9 +915,10 @@ export function MapViewExplore({
             map.off('dblclick', handleSourceDoubleClick);
             map.doubleClickZoom.enable();
         };
-    }, [map, isLoaded, scanStep, scanMode, scanRangeM]);
+    }, [map, isLoaded, scanStep, scanMode, scanRangeM, mode]);
 
     useEffect(() => {
+        if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'adjusting_range' || !sourceLocation || scanMode !== '360') return;
 
         const clampRange = (value: number) =>
@@ -551,9 +949,10 @@ export function MapViewExplore({
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
         };
-    }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode]);
+    }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode, mode]);
 
     useEffect(() => {
+        if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'selecting_target') return;
 
         setPreviewDeltaTheta(null);
@@ -579,9 +978,10 @@ export function MapViewExplore({
             map.getCanvas().style.cursor = '';
             map.off('click', handleTargetClick);
         };
-    }, [map, isLoaded, scanStep, scanMode]);
+    }, [map, isLoaded, scanStep, scanMode, mode]);
 
     useEffect(() => {
+        if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'adjusting_angle' || !sourceLocation || !targetLocation || scanMode !== 'fan') {
             if (previewDeltaTheta !== null) setPreviewDeltaTheta(null);
             return;
@@ -618,7 +1018,7 @@ export function MapViewExplore({
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
         };
-    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode]);
+    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode, mode]);
 
 
     // Execute Scan Logic (Manual Trigger)
@@ -783,10 +1183,6 @@ export function MapViewExplore({
             map.off('zoom', updateZoom);
             map.off('move', updateZoom);
         };
-        return () => {
-            map.off('zoom', updateZoom);
-            map.off('move', updateZoom);
-        };
     }, [map, onZoomChange]);
 
     // Track map rotation (Bearing)
@@ -890,6 +1286,7 @@ export function MapViewExplore({
                 previewRangeM={scanMode === '360' && scanStep === 'adjusting_range' ? previewRangeM : null}
                 preferPreview={scanStep === 'adjusting_angle'}
                 showTargetRing={scanStep === 'adjusting_angle'}
+                viirsPoints={viirsPoints}
                 targetRingState={{
                     previewDeltaTheta,
                     setPreviewDeltaTheta,

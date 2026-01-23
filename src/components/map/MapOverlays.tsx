@@ -3,7 +3,9 @@ import type maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
+import { GL } from '@luma.gl/constants';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
+import type { ViirsPoint } from '../../lib/viirsSampler';
 
 type TargetRingState = {
     previewDeltaTheta: number | null;
@@ -29,6 +31,7 @@ type MapOverlaysProps = {
     preferPreview?: boolean;
     showTargetRing?: boolean;
     targetRingState?: TargetRingState;
+    viirsPoints?: ViirsPoint[];
 };
 
 export function MapOverlays({
@@ -46,12 +49,74 @@ export function MapOverlays({
     preferPreview,
     showTargetRing,
     targetRingState,
+    viirsPoints,
 }: MapOverlaysProps) {
     const overlayRef = useRef<MapboxOverlay | null>(null);
     const isDraggingRef = useRef(false);
     const pointerIdRef = useRef<number | null>(null);
     const [ringPosition, setRingPosition] = useState<{ x: number; y: number } | null>(null);
     const targetRingStateRef = useRef<TargetRingState | null>(null);
+
+    // フェードイン用の状態
+    const [viirsOpacity, setViirsOpacity] = useState(1); // 初期値を1に
+    const prevViirsCountRef = useRef(0);
+    const fadeAnimationRef = useRef<number | null>(null);
+
+    // VIIRSポイントが更新されたらフェードインアニメーション
+    useEffect(() => {
+        const currentCount = viirsPoints?.length ?? 0;
+        const prevCount = prevViirsCountRef.current;
+
+        // ポイントがある場合は常にopacity=1を保証
+        if (currentCount > 0) {
+            // 大きく変わった場合のみフェードインアニメーション
+            if (prevCount === 0 || Math.abs(currentCount - prevCount) > prevCount * 0.3) {
+                setViirsOpacity(0);
+
+                // 既存のアニメーションをキャンセル
+                if (fadeAnimationRef.current !== null) {
+                    cancelAnimationFrame(fadeAnimationRef.current);
+                }
+
+                const startTime = performance.now();
+                const duration = 400; // 400ms でフェードイン
+
+                const animate = (now: number) => {
+                    const elapsed = now - startTime;
+                    const progress = Math.min(1, elapsed / duration);
+                    // イージング (ease-out)
+                    const eased = 1 - Math.pow(1 - progress, 3);
+                    setViirsOpacity(eased);
+
+                    if (progress < 1) {
+                        fadeAnimationRef.current = requestAnimationFrame(animate);
+                    } else {
+                        fadeAnimationRef.current = null;
+                    }
+                };
+
+                fadeAnimationRef.current = requestAnimationFrame(animate);
+            } else {
+                // ポイント数があまり変わらない場合は即座にopacity=1
+                setViirsOpacity(1);
+            }
+        }
+
+        prevViirsCountRef.current = currentCount;
+
+        return () => {
+            if (fadeAnimationRef.current !== null) {
+                cancelAnimationFrame(fadeAnimationRef.current);
+            }
+        };
+    }, [viirsPoints]);
+
+    const glowBlendParams = {
+        blend: true,
+        blendEquation: GL.FUNC_ADD,
+        blendFunc: [GL.SRC_ALPHA, GL.ONE, GL.ONE, GL.ONE] as [number, number, number, number],
+        depthTest: false,
+    };
 
     // Initialize Deck.gl Overlay
     useEffect(() => {
@@ -502,7 +567,59 @@ export function MapOverlays({
             }
         }
 
-        const layers = [
+        const layers = [];
+        const particleData = viirsPoints ?? [];
+
+        if (particleData.length > 0) {
+            layers.push(
+                new ScatterplotLayer<ViirsPoint>({
+                    id: 'night-particles-halo',
+                    data: particleData,
+                    pickable: false,
+                    opacity: 0.9 * viirsOpacity, // フェードイン適用
+                    radiusUnits: 'pixels',
+                    billboard: true,
+                    stroked: false,
+                    filled: true,
+                    getPosition: d => d.position,
+                    getRadius: d => 2 + d.intensity * 5,
+                    radiusMinPixels: 1,
+                    radiusMaxPixels: 8,
+                    getFillColor: d => {
+                        const a = Math.round((10 + d.intensity * 22) * viirsOpacity);
+                        return [255, 235, 190, a];
+                    },
+                    updateTriggers: {
+                        getFillColor: viirsOpacity,
+                    },
+                    parameters: glowBlendParams,
+                }),
+                new ScatterplotLayer<ViirsPoint>({
+                    id: 'night-particles-core',
+                    data: particleData,
+                    pickable: false,
+                    opacity: viirsOpacity, // フェードイン適用
+                    radiusUnits: 'pixels',
+                    billboard: true,
+                    stroked: false,
+                    filled: true,
+                    getPosition: d => d.position,
+                    getRadius: d => 0.8 + d.intensity * 1.4,
+                    radiusMinPixels: 0.6,
+                    radiusMaxPixels: 3,
+                    getFillColor: d => {
+                        const a = Math.round((70 + d.intensity * 90) * viirsOpacity);
+                        return [255, 255, 255, a];
+                    },
+                    updateTriggers: {
+                        getFillColor: viirsOpacity,
+                    },
+                    parameters: glowBlendParams,
+                })
+            );
+        }
+
+        layers.push(
             new LineLayer({
                 id: 'fan-rim',
                 data: rimSegs,
@@ -551,11 +668,22 @@ export function MapOverlays({
                 getLineWidth: 3,
                 parameters: { depthTest: false },
             }),
-
-        ];
+        );
 
         overlayRef.current.setProps({ layers });
-    }, [isFanMode, fanRayResults, rayResult, map, sourceLocation, targetLocation, previewFanConfig, previewRangeM]);
+    }, [
+        isFanMode,
+        fanRayResults,
+        rayResult,
+        map,
+        sourceLocation,
+        targetLocation,
+        previewFanConfig,
+        previewRangeM,
+        glowBlendParams,
+        viirsPoints,
+        viirsOpacity, // フェードイン用
+    ]);
 
 
     // Update GeoJSON markers (Source, Target, Current, Hover)

@@ -36,10 +36,10 @@ function addVIIRSNightLight(map: maplibregl.Map) {
     if (!map.getSource(VIIRS_SOURCE_ID)) {
         map.addSource(VIIRS_SOURCE_ID, {
             type: 'raster',
-            tiles: ['http://localhost:5173/viirs_heat_tiles/tiles/{z}/{x}/{y}.png'],
+            tiles: ['/viirs_heat_tiles/tiles/{z}/{x}/{y}.png'],
             tileSize: 256,
-            minzoom: 4,
-            maxzoom: 10,
+            minzoom: 10,
+            maxzoom: 12,
         });
         console.log('[VIIRS] Source added');
     }
@@ -49,11 +49,14 @@ function addVIIRSNightLight(map: maplibregl.Map) {
             id: VIIRS_LAYER_ID,
             type: 'raster',
             source: VIIRS_SOURCE_ID,
+            layout: {
+                visibility: 'none', // 常に非表示（サンプリング用にソースのみ利用）
+            },
             paint: {
-                'raster-opacity': 0.2,
+                'raster-opacity': 0,
             },
         });
-        console.log('[VIIRS] Layer added');
+        console.log('[VIIRS] Layer added as hidden');
     }
 }
 
@@ -118,23 +121,31 @@ function addPlateauExtrusion(map: maplibregl.Map) {
     if (!map.getLayer(PLATEAU_LAYER_ID)) {
         const firstSymbolId = map.getStyle().layers?.find((l) => l.type === 'symbol')?.id;
 
+        // ズームレベル13以上で表示、フェードイン効果付き
         map.addLayer(
             {
                 id: PLATEAU_LAYER_ID,
                 type: 'fill-extrusion',
                 source: PLATEAU_SOURCE_ID,
                 'source-layer': SOURCE_LAYER_ID,
-                minzoom: 10,
+                minzoom: 13,
                 paint: {
                     'fill-extrusion-color': '#9ca3af',
-                    'fill-extrusion-opacity': 0.9,
+                    // ズーム13-14でフェードイン (0→0.9)
+                    'fill-extrusion-opacity': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        13, 0,
+                        14, 0.9,
+                    ],
                     'fill-extrusion-height': ['coalesce', ['get', HEIGHT_PROPERTY], 10],
                     'fill-extrusion-base': 0,
                 },
             },
             firstSymbolId
         );
-        console.log('[PLATEAU] Layer added');
+        console.log('[PLATEAU] Layer added (minzoom: 13)');
 
         // Debug: check features
         map.once('idle', () => {
@@ -156,8 +167,13 @@ function addTerrain(
     gsiTerrainSource: maplibregl.SourceSpecification,
     exaggeration: number
 ) {
+    const terrainSource = { ...(gsiTerrainSource as any) } as any;
+    if ('scheme' in terrainSource) {
+        delete terrainSource.scheme;
+    }
+
     if (!map.getSource(TERRAIN_SOURCE_ID)) {
-        map.addSource(TERRAIN_SOURCE_ID, gsiTerrainSource as any);
+        map.addSource(TERRAIN_SOURCE_ID, terrainSource);
         console.log('[Terrain] Source added');
     }
 
@@ -169,7 +185,7 @@ function addTerrain(
     }
 
     if (!map.getSource(HILLSHADE_SOURCE_ID)) {
-        map.addSource(HILLSHADE_SOURCE_ID, { ...(gsiTerrainSource as any) } as any);
+        map.addSource(HILLSHADE_SOURCE_ID, { ...terrainSource } as any);
     }
 
     if (!map.getLayer(HILLSHADE_LAYER_ID)) {
@@ -187,12 +203,17 @@ function addTerrain(
 // Main Hook
 // ============================================
 
+const TOKYO_BOUNDS: maplibregl.LngLatBoundsLike = [
+    [138.9, 35.2],
+    [140.2, 35.9],
+];
+
 export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
     const mapRef = useRef<maplibregl.Map | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
 
     const gsiTerrainSource = useMemo(
-        () => useGsiTerrainSource(maplibregl.addProtocol, { maxzoom: 14 }),
+        () => useGsiTerrainSource(maplibregl.addProtocol, { maxzoom: 9 }),
         []
     );
 
@@ -203,8 +224,8 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             container: containerRef.current,
             style: DEFAULT_STYLE,
             center: [139.76, 35.68],
-            zoom: 15.2,
-            pitch: 60,
+            zoom: 9,
+            pitch: 0,
             bearing: 0,
             maxPitch: 85,
         });
@@ -216,6 +237,13 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             if (mapRef.current !== map) return;
 
             console.log('[Map] Loaded');
+            map.fitBounds(TOKYO_BOUNDS, {
+                padding: { top: 40, bottom: 40, left: 40, right: 40 },
+                pitch: 0,
+                bearing: 0,
+                duration: 0,
+                maxZoom: 11,
+            });
             ensureOverlays(map);
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
