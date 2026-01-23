@@ -4,6 +4,7 @@ tile_DSM/
 # Ignore generated VIIRS tile outputs (created by tile scripts)
 viirs_heat_tiles/
 public/viirs_heat_tiles
+public/viirs_value_tiles/
 
 # Logs
 *.log
