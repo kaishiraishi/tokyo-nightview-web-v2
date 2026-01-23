@@ -37,6 +37,7 @@ function App() {
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
     const [zoomLevel, setZoomLevel] = useState<number | null>(null);
     const [resetScan, setResetScan] = useState<() => void>(() => {});
+    const [searchTarget, setSearchTarget] = useState<{ lat: number; lng: number } | null>(null);
     const [scanStatus, setScanStatus] = useState<ScanStatus>({
         scanStep: 'idle',
         loading: false,
@@ -68,6 +69,10 @@ function App() {
         setZoomLevel(zoom);
     }, []);
 
+    const handleSearchLocation = useCallback((lat: number, lng: number) => {
+        setSearchTarget({ lat, lng });
+    }, []);
+
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
             {/* Full Screen Map */}
@@ -82,7 +87,9 @@ function App() {
                         profile={profile}
                         hoveredIndex={hoveredIndex}
                         clickedIndex={clickedIndex}
-                    onZoomChange={handleZoomChange}
+                        onZoomChange={handleZoomChange}
+                        searchTarget={searchTarget}
+                        onSearchTargetConsumed={() => setSearchTarget(null)}
                 />
             </div>
 
@@ -98,6 +105,7 @@ function App() {
                     occlusionDistance={rayResult?.distance ?? null}
                     scanStatus={scanStatus}
                     onResetScan={resetScan}
+                    onSearchLocation={handleSearchLocation}
                 />
             </div>
         </div>

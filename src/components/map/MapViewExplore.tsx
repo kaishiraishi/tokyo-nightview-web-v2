@@ -45,6 +45,8 @@ type MapViewProps = {
     hoveredIndex: number | null;
     clickedIndex: number | null;
     onZoomChange: (zoom: number) => void;
+    searchTarget?: { lat: number; lng: number } | null;
+    onSearchTargetConsumed?: () => void;
 };
 
 export function MapViewExplore({
@@ -58,6 +60,8 @@ export function MapViewExplore({
     hoveredIndex,
     clickedIndex,
     onZoomChange,
+    searchTarget,
+    onSearchTargetConsumed,
 }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
@@ -413,6 +417,18 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             duration: 1200,
         });
     }, [map, isLoaded]);
+
+    // Handle search target flyTo
+    useEffect(() => {
+        if (!map || !isLoaded || !searchTarget) return;
+        map.flyTo({
+            center: [searchTarget.lng, searchTarget.lat],
+            zoom: 15,
+            pitch: 60,
+            duration: 1500,
+        });
+        onSearchTargetConsumed?.();
+    }, [map, isLoaded, searchTarget, onSearchTargetConsumed]);
 
     // Update VIIRS layer opacity
     // （ラスタ自体は非表示にするが、UI連動を残す場合はコメントアウト、完全に消す場合は削除）

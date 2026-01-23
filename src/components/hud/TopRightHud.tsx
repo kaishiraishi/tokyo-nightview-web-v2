@@ -3,6 +3,7 @@ import { Search, Sparkles } from 'lucide-react';
 import { ProfileChart } from '../profile/ProfileChart';
 import { UserProfileCard } from '../profile/UserProfileCard';
 import { MOCK_POSTS } from '../../data/mockPosts';
+import { searchLocation, type GeocodingResult } from '../../lib/api/geocodingApi';
 import type { ScanMode, ScanStep } from '../map/types';
 import type { ProfileResponse, RayResult } from '../../types/profile';
 
@@ -29,6 +30,7 @@ type TopRightHudProps = {
         };
     };
     onResetScan: () => void;
+    onSearchLocation: (lat: number, lng: number) => void;
 };
 
 export function TopRightHud({
@@ -42,8 +44,40 @@ export function TopRightHud({
     occlusionDistance,
     scanStatus,
     onResetScan,
+    onSearchLocation,
 }: TopRightHudProps) {
     const [cardView, setCardView] = useState<'status' | 'profile'>('status');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<GeocodingResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [showResults, setShowResults] = useState(false);
+
+    const handleSearch = async () => {
+        if (!searchQuery.trim()) return;
+        setIsSearching(true);
+        try {
+            const results = await searchLocation(searchQuery);
+            setSearchResults(results);
+            setShowResults(true);
+        } catch (err) {
+            console.error('Search failed:', err);
+            setSearchResults([]);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const handleSelectResult = (result: GeocodingResult) => {
+        onSearchLocation(result.lat, result.lng);
+        setShowResults(false);
+        setSearchQuery(result.displayName.split(',')[0]);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSearch();
+        }
+    };
 
     return (
         <div className="flex w-[360px] flex-col gap-3 text-white">
@@ -60,15 +94,50 @@ export function TopRightHud({
                 >
                     P
                 </button>
-                <div className="flex h-11 flex-1 items-center gap-2 rounded-full border border-white/10 bg-black/60 px-4 shadow-lg backdrop-blur-md">
+                <div className="relative z-50 flex h-11 flex-1 items-center gap-2 rounded-full border border-white/10 bg-black/60 px-4 shadow-lg backdrop-blur-md">
                     <span className="text-white/70" aria-hidden="true">
                         🔍
                     </span>
                     <input
                         className="w-full bg-transparent text-sm text-white placeholder-white/50 outline-none"
-                        placeholder="Search location"
+                        placeholder="場所を検索"
                         type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        onFocus={() => searchResults.length > 0 && setShowResults(true)}
                     />
+                    {isSearching && (
+                        <span className="text-xs text-white/50 animate-pulse">...</span>
+                    )}
+                    {showResults && searchResults.length > 0 && (
+                        <div
+                            className="absolute left-0 right-0 top-full mt-2 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-black/95 p-1 shadow-2xl backdrop-blur-md z-[100]"
+                            onMouseLeave={() => setShowResults(false)}
+                        >
+                            {searchResults.map((result, index) => {
+                                const parts = result.displayName.split(',');
+                                const name = parts[0];
+                                const address = parts.slice(1).join(', ').trim();
+
+                                return (
+                                    <button
+                                        key={index}
+                                        type="button"
+                                        onClick={() => handleSelectResult(result)}
+                                        className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/10"
+                                    >
+                                        <div className="text-xs font-semibold text-white">{name}</div>
+                                        {address && (
+                                            <div className="mt-0.5 text-xs text-white/50 line-clamp-2">
+                                                {address}
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
 
