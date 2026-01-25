@@ -1,3 +1,4 @@
+import { type Post } from '../lib/postsApi';
 import sampleImage1 from './resized/sample_image1.jpg';
 import sampleImage2 from './resized/sample_image2.jpg';
 import sampleImage3 from './resized/sample_image3.jpg';
@@ -8,15 +9,6 @@ import sampleImage7 from './resized/sample_image7.jpg';
 import sampleImage8 from './resized/sample_image8.jpg';
 import sampleImage9 from './resized/sample_image9.jpg';
 import sampleImage10 from './resized/sample_image10.jpg';
-
-export type Post = {
-    id: string;
-    location: { lng: number; lat: number; placeName?: string; area?: string };
-    caption: string;
-    photos: { url: string }[];
-    author: { id: string; name: string; avatarUrl?: string };
-    createdAt: string;
-};
 
 export const MOCK_POSTS: Post[] = [
     {

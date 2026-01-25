@@ -1,32 +1,7 @@
 import { useCallback, useState } from 'react';
-import { TopRightHud } from './components/hud/TopRightHud';
-import { MapViewAnalyze } from './components/map/MapViewAnalyze';
 import { MapViewExplore } from './components/map/MapViewExplore';
-import type { ScanMode, ScanStep } from './components/map/types';
+import type { ScanMode } from './components/map/types';
 import type { ProfileResponse } from './types/profile';
-
-// Ray collision result type
-type RayResult = {
-    hit: boolean;
-    distance: number | null;
-    hitPoint: { lng: number; lat: number } | null;
-    elevation: number | null;
-    reason: 'clear' | 'building' | 'terrain';
-};
-
-type ScanStatus = {
-    scanStep: ScanStep;
-    loading: boolean;
-    error: string | null;
-    rayResult: RayResult | null;
-    previewDeltaTheta: number | null;
-    deltaTheta: number;
-    fanStats: {
-        total: number;
-        blocked: number;
-        clear: number;
-    };
-};
 
 function App() {
     const [mode, setMode] = useState<'explore' | 'analyze'>('explore');
@@ -34,19 +9,7 @@ function App() {
     const [profile, setProfile] = useState<ProfileResponse | null>(null);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [clickedIndex, setClickedIndex] = useState<number | null>(null);
-    const [rayResult, setRayResult] = useState<RayResult | null>(null);
-    const [zoomLevel, setZoomLevel] = useState<number | null>(null);
-    const [resetScan, setResetScan] = useState<() => void>(() => {});
     const [searchTarget, setSearchTarget] = useState<{ lat: number; lng: number } | null>(null);
-    const [scanStatus, setScanStatus] = useState<ScanStatus>({
-        scanStep: 'idle',
-        loading: false,
-        error: null,
-        rayResult: null,
-        previewDeltaTheta: null,
-        deltaTheta: 0,
-        fanStats: { total: 0, blocked: 0, clear: 0 },
-    });
 
     const handleProfileChange = useCallback((p: ProfileResponse | null) => {
         setProfile(p);
@@ -61,51 +24,27 @@ function App() {
         setClickedIndex(index);
     }, []);
 
-    const handleRayResultChange = useCallback((result: RayResult | null) => {
-        setRayResult(result);
-    }, []);
-
-    const handleZoomChange = useCallback((zoom: number) => {
-        setZoomLevel(zoom);
-    }, []);
-
-    const handleSearchLocation = useCallback((lat: number, lng: number) => {
-        setSearchTarget({ lat, lng });
-    }, []);
-
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
             {/* Full Screen Map */}
             <div className="absolute inset-0">
                     <MapViewExplore
                         onProfileChange={handleProfileChange}
-                        onRayResultChange={handleRayResultChange}
-                        onScanStatusChange={setScanStatus}
-                        onResetReady={setResetScan}
+                        onRayResultChange={() => {}}
+                        onScanStatusChange={() => {}}
+                        onResetReady={() => {}}
                         mode={mode}
                         scanMode={scanMode}
                         profile={profile}
                         hoveredIndex={hoveredIndex}
                         clickedIndex={clickedIndex}
-                        onZoomChange={handleZoomChange}
+                        onZoomChange={() => {}}
                         searchTarget={searchTarget}
                         onSearchTargetConsumed={() => setSearchTarget(null)}
-                />
-            </div>
-
-            <div className="absolute top-4 left-4 z-50 pointer-events-auto">
-                <TopRightHud
-                    mode={mode}
-                    onModeChange={setMode}
-                    scanMode={scanMode}
-                    onScanModeChange={setScanMode}
-                    profile={profile}
-                    onProfileHover={handleHover}
-                    onProfileClick={handleClick}
-                    occlusionDistance={rayResult?.distance ?? null}
-                    scanStatus={scanStatus}
-                    onResetScan={resetScan}
-                    onSearchLocation={handleSearchLocation}
+                        onModeChange={setMode}
+                        onScanModeChange={setScanMode}
+                        onProfileHover={handleHover}
+                        onProfileClick={handleClick}
                 />
             </div>
         </div>

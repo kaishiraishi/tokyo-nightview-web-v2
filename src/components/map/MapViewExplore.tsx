@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
+import { Camera, Layers } from 'lucide-react';
+import { LayerMenu } from '../layout/LayerMenu';
+import { TopBar } from '../layout/TopBar';
+import { ScanControlPanel } from '../hud/ScanControlPanel';
+import { PostListPanel } from '../hud/PostListPanel';
 import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
 import { fetchProfile } from '../../lib/api/dsmApi';
+import { searchLocation, type GeocodingResult } from '../../lib/api/geocodingApi';
 import { buildViirsPoints, clearViirsCache, type ViirsPoint } from '../../lib/viirsSampler';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import { CurrentLocationButton } from '../ui/CurrentLocationButton';
@@ -49,6 +55,10 @@ type MapViewProps = {
     onZoomChange: (zoom: number) => void;
     searchTarget?: { lat: number; lng: number } | null;
     onSearchTargetConsumed?: () => void;
+    onModeChange: (mode: 'explore' | 'analyze') => void;
+    onScanModeChange: (mode: ScanMode) => void;
+    onProfileHover: (index: number | null) => void;
+    onProfileClick: (index: number) => void;
 };
 
 export function MapViewExplore({
@@ -64,19 +74,27 @@ export function MapViewExplore({
     onZoomChange,
     searchTarget,
     onSearchTargetConsumed,
+    onModeChange,
+    onScanModeChange,
+    onProfileHover,
+    onProfileClick,
 }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const { map, isLoaded } = useMapLibre(containerRef);
     const { location: currentLocation, error: geoError } = useGeolocation();
 
     // Modal State
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const settingsPanelRef = useRef<HTMLDivElement | null>(null);
-    const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const [sourceLocation, setSourceLocation] = useState<LngLat | null>(null);
     const [targetLocation, setTargetLocation] = useState<LngLat | null>(null);
     const [scanStep, setScanStep] = useState<ScanStep>('idle');
+    const lastStepChangeTimeRef = useRef<number>(0);
+
+    const handleSetScanStep = useCallback((step: ScanStep) => {
+        setScanStep(step);
+        lastStepChangeTimeRef.current = Date.now();
+    }, []);
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [scanRangeM, setScanRangeM] = useState<number>(RANGE_MIN_M);
@@ -95,7 +113,16 @@ export function MapViewExplore({
     const hasInitialFlyRef = useRef(false);
 
     const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
-    // const [isCollapsed, setIsCollapsed] = useState(false); // Lifted to App.tsx
+    const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(true);
+
+    // Search State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<GeocodingResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [showResults, setShowResults] = useState(false);
+
+    // Posts State
+    const [posts, setPosts] = useState<Post[]>(MOCK_POSTS);
 
     // Sight angle state
     const [sightAngle] = useState<number>(SIGHT_ANGLE_PRESETS.HORIZONTAL);
@@ -104,7 +131,7 @@ export function MapViewExplore({
     const [rayResult, setRayResult] = useState<RayResult | null>(null);
 
     // Fan mode state
-    const isFanMode = true;
+    const isFanMode = scanMode === 'fan' || scanMode === '360';
     const fanDeltaThetaRef = useRef(FAN_PRESETS.DELTA_THETA.MEDIUM);
     const [fanConfig, setFanConfig] = useState<FanConfig>({
         deltaTheta: FAN_PRESETS.DELTA_THETA.MEDIUM,
@@ -117,6 +144,83 @@ export function MapViewExplore({
     const hoveredPostIdRef = useRef<string | number | null>(null);
     const postPopupsRef = useRef<Map<string, maplibregl.Popup>>(new Map());
     
+    // --- UI Handlers (New) ---
+    const handleScanModeChange = useCallback((newMode: ScanMode) => {
+        onScanModeChange(newMode);
+        handleSetScanStep('idle');
+    }, [onScanModeChange, handleSetScanStep]);
+
+    // Guidance for TopBar
+    const currentGuidance = useMemo(() => {
+        if (mode !== 'explore') return null;
+
+        const fanSteps = [
+            { key: 'source', label: '観測点の決定', triggerSteps: ['idle', 'selecting_source'] },
+            { key: 'target', label: '目標点の決定', triggerSteps: ['selecting_target'] },
+            { key: 'angle', label: '視界の設定', triggerSteps: ['adjusting_angle', 'scanning', 'complete'] },
+        ];
+
+        const p360Steps = [
+            { key: 'source', label: '観測点の決定', triggerSteps: ['idle', 'selecting_source'] },
+            { key: 'range', label: '範囲の設定', triggerSteps: ['adjusting_range'] },
+            { key: 'scanning', label: '解析の実行', triggerSteps: ['scanning', 'complete'] },
+        ];
+
+        const steps = scanMode === 'fan' ? fanSteps : p360Steps;
+        const activeStep = steps.find(s => s.triggerSteps.includes(scanStep)) || steps[0];
+
+        return {
+            steps: steps.map(s => ({ key: s.key, label: s.label })),
+            currentStep: activeStep.key,
+        };
+    }, [mode, scanMode, scanStep]);
+
+    const handleSearch = useCallback(async (query: string) => {
+        if (!query.trim()) return;
+        setIsSearching(true);
+        try {
+            const results = await searchLocation(query);
+            setSearchResults(results);
+            setShowResults(true);
+        } catch (error) {
+            console.error('Search failed:', error);
+        } finally {
+            setIsSearching(false);
+        }
+    }, []);
+
+    const handleStepClick = useCallback((stepKey: string) => {
+        if (mode !== 'explore') return;
+        
+        if (stepKey === 'source') {
+            handleSetScanStep('selecting_source');
+            setSourceLocation(null);
+            setTargetLocation(null);
+            setRayResult(null);
+            setFanRayResults([]);
+        } else if (stepKey === 'target' || stepKey === 'range') {
+            if (!sourceLocation) return;
+            handleSetScanStep(scanMode === 'fan' ? 'selecting_target' : 'adjusting_range');
+            setTargetLocation(null);
+            setRayResult(null);
+            setFanRayResults([]);
+        }
+    }, [mode, scanMode, sourceLocation, handleSetScanStep]);
+
+    const handleSelectResult = useCallback((result: GeocodingResult) => {
+        if (!map) return;
+        
+        map.flyTo({
+            center: [result.lng, result.lat],
+            zoom: 15,
+            duration: 2000
+        });
+        
+        setSearchQuery(result.displayName);
+        setShowResults(false);
+        setSearchResults([]);
+    }, [map]);
+
     // Handler for Deck.gl Post Hover
     const handlePostHover = useCallback((id: string | null) => {
         if (mode !== 'analyze' || !map) return;
@@ -144,13 +248,12 @@ export function MapViewExplore({
     const POSTS_IMAGE_ZOOM_THRESHOLD = 13;
 
     // Posts state (Supabase + MOCK_POSTS)
-    const [posts, setPosts] = useState<Post[]>([]);
     const [isPostModalOpen, setIsPostModalOpen] = useState(false);
     const [postMessage, setPostMessage] = useState('');
     const [postPhotoUrl, setPostPhotoUrl] = useState('');
     const [postPhotoFile, setPostPhotoFile] = useState<File | null>(null);
     const [isPosting, setIsPosting] = useState(false);
-    const [postLocationMode, setPostLocationMode] = useState<'center' | 'current' | 'pin'>('center');
+    const [postLocationMode, setPostLocationMode] = useState<'current' | 'pin'>('current');
     const [postPinLocation, setPostPinLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [isPinSelecting, setIsPinSelecting] = useState(false);
     const postModalRef = useRef<HTMLDivElement | null>(null);
@@ -434,7 +537,7 @@ export function MapViewExplore({
                 setPostMessage('');
                 setPostPhotoUrl('');
                 setPostPhotoFile(null);
-                setPostLocationMode('center');
+                setPostLocationMode('current');
                 setPostPinLocation(null);
                 setIsPostModalOpen(false);
             }
@@ -691,31 +794,6 @@ export function MapViewExplore({
     }, [map, isLoaded, aerialEnabled]);
 
     useEffect(() => {
-        if (!isSettingsOpen) return;
-
-        const handlePointerDown = (event: MouseEvent) => {
-            const target = event.target as Node;
-            if (settingsPanelRef.current?.contains(target)) return;
-            if (settingsButtonRef.current?.contains(target)) return;
-            setIsSettingsOpen(false);
-        };
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setIsSettingsOpen(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
-
-        return () => {
-            document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [isSettingsOpen]);
-
-    useEffect(() => {
         if (!map || !isLoaded) return;
         // Previously managed 'posts-layer' here.
         // Now posts are rendered via MapOverlays (Deck.gl)
@@ -915,9 +993,9 @@ export function MapViewExplore({
     useEffect(() => {
         if (mode !== 'explore') return;
         if (scanStep === 'idle') {
-            setScanStep('selecting_source');
+            handleSetScanStep('selecting_source');
         }
-    }, [scanStep, mode]);
+    }, [scanStep, mode, handleSetScanStep]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
@@ -939,27 +1017,8 @@ export function MapViewExplore({
         });
     }, [scanStep, loading, error, rayResult, fanRayResults, onScanStatusChange, mode]);
 
-    useEffect(() => {
-        const reset = () => {
-            setScanStep('idle');
-            setSourceLocation(null);
-            setTargetLocation(null);
-            setFanRayResults([]);
-            setPreviewDeltaTheta(null);
-            setPreviewRangeM(null);
-            setRayResult(null);
-            setError(null);
-            setLoading(false);
-            onRayResultChange(null);
-            onProfileChange(null);
-        };
-
-        onResetReady(() => reset);
-    }, [onResetReady]);
-
-    useEffect(() => {
-        if (mode !== 'analyze') return;
-        setScanStep('idle');
+    const reset = useCallback(() => {
+        handleSetScanStep('idle');
         setSourceLocation(null);
         setTargetLocation(null);
         setFanRayResults([]);
@@ -970,40 +1029,68 @@ export function MapViewExplore({
         setLoading(false);
         onRayResultChange(null);
         onProfileChange(null);
-    }, [mode, onProfileChange, onRayResultChange]);
+    }, [onRayResultChange, onProfileChange, handleSetScanStep]);
+
+    useEffect(() => {
+        onResetReady(reset);
+    }, [onResetReady, reset]);
+
+    useEffect(() => {
+        if (mode !== 'analyze') return;
+        handleSetScanStep('idle');
+        setSourceLocation(null);
+        setTargetLocation(null);
+        setFanRayResults([]);
+        setPreviewDeltaTheta(null);
+        setPreviewRangeM(null);
+        setRayResult(null);
+        setError(null);
+        setLoading(false);
+        onRayResultChange(null);
+        onProfileChange(null);
+    }, [mode, onProfileChange, onRayResultChange, handleSetScanStep]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
-        const handleSourceDoubleClick = (e: maplibregl.MapMouseEvent) => {
-            e.preventDefault();
-            const nextSource = {
-                lng: e.lngLat.lng,
-                lat: e.lngLat.lat,
-            };
+        const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
+            if (Date.now() - lastStepChangeTimeRef.current < 200) return;
+            
+            let nextSource;
+            if (isMobile) {
+                const center = map.getCenter();
+                nextSource = { lng: center.lng, lat: center.lat };
+            } else {
+                nextSource = {
+                    lng: e.lngLat.lng,
+                    lat: e.lngLat.lat,
+                };
+            }
+            
             setSourceLocation(nextSource);
             if (scanMode === '360') {
                 setTargetLocation(null);
                 setPreviewRangeM(scanRangeM);
                 setFanRayResults([]);
                 setRayResult(null);
-                setScanStep('adjusting_range');
+                handleSetScanStep('adjusting_range');
                 return;
             }
-            setScanStep(scanMode === '360' ? 'complete' : 'selecting_target');
+            // 自動で目標点選択へ
+            handleSetScanStep('selecting_target');
         };
 
         map.getCanvas().style.cursor = 'crosshair';
         map.doubleClickZoom.disable();
-        map.on('dblclick', handleSourceDoubleClick);
+        map.on('click', handleSourceClick);
 
         return () => {
             map.getCanvas().style.cursor = '';
-            map.off('dblclick', handleSourceDoubleClick);
+            map.off('click', handleSourceClick);
             map.doubleClickZoom.enable();
         };
-    }, [map, isLoaded, scanStep, scanMode, scanRangeM, mode]);
+    }, [map, isLoaded, scanStep, scanMode, scanRangeM, mode, handleSetScanStep]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
@@ -1012,32 +1099,47 @@ export function MapViewExplore({
         const clampRange = (value: number) =>
             Math.max(RANGE_MIN_M, Math.min(RANGE_MAX_M, value));
 
-        const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+        const handleMouseMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+            // Prevent page scrolling/panning during adjustment
+            if (e.originalEvent) {
+                // Not calling preventDefault here anymore to allow potential map pan if desired,
+                // but MapLibre already handles dragPan.disable()
+            }
+            if (!e.lngLat) return;
             const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
-                .distanceTo(new maplibregl.LngLat(e.lngLat.lng, e.lngLat.lat));
+                .distanceTo(e.lngLat);
             setPreviewRangeM(clampRange(distance));
         };
 
         const handleClick = () => {
+            if (Date.now() - lastStepChangeTimeRef.current < 200) return;
             const nextRange = clampRange(previewRangeM ?? scanRangeM);
             setScanRangeM(nextRange);
             setPreviewRangeM(null);
-            setScanStep('scanning');
+            handleSetScanStep('scanning');
             const northTarget = calculateEndpoint(sourceLocation, 0, nextRange);
             setTargetLocation(northTarget);
             executeScan({ deltaTheta: 360 }, northTarget);
         };
 
         map.on('mousemove', handleMouseMove);
+        map.on('touchmove', handleMouseMove);
         map.on('click', handleClick);
         map.getCanvas().style.cursor = 'col-resize';
+        
+        // Disable map movement while adjusting on mobile
+        map.dragPan.disable();
+        map.touchZoomRotate.disable();
 
         return () => {
             map.off('mousemove', handleMouseMove);
+            map.off('touchmove', handleMouseMove);
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
+            map.dragPan.enable();
+            map.touchZoomRotate.enable();
         };
-    }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode, mode]);
+    }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode, mode, handleSetScanStep]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
@@ -1045,28 +1147,52 @@ export function MapViewExplore({
 
         setPreviewDeltaTheta(null);
 
-        const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
-            const nextTarget = {
+        const handleTargetMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+            if (e.originalEvent) {
+                // e.originalEvent.preventDefault();
+            }
+            if (!e.lngLat) return;
+            setTargetLocation({
                 lng: e.lngLat.lng,
                 lat: e.lngLat.lat,
-            };
+            });
+        };
+
+        const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
+            if (Date.now() - lastStepChangeTimeRef.current < 200) return;
+            
+            let nextTarget;
+            if (isMobile) {
+                const center = map.getCenter();
+                nextTarget = { lng: center.lng, lat: center.lat };
+            } else {
+                nextTarget = {
+                    lng: e.lngLat.lng,
+                    lat: e.lngLat.lat,
+                };
+            }
+            
             setTargetLocation(nextTarget);
             if (scanMode === '360') {
-                setScanStep('scanning');
+                handleSetScanStep('scanning');
                 executeScan({ deltaTheta: 360 }, nextTarget);
                 return;
             }
-            setScanStep('adjusting_angle');
+            handleSetScanStep('adjusting_angle');
         };
 
         map.getCanvas().style.cursor = 'crosshair';
+        map.on('mousemove', handleTargetMove);
+        map.on('touchmove', handleTargetMove);
         map.on('click', handleTargetClick);
 
         return () => {
             map.getCanvas().style.cursor = '';
+            map.off('mousemove', handleTargetMove);
+            map.off('touchmove', handleTargetMove);
             map.off('click', handleTargetClick);
         };
-    }, [map, isLoaded, scanStep, scanMode, mode]);
+    }, [map, isLoaded, scanStep, scanMode, mode, handleSetScanStep]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
@@ -1079,7 +1205,12 @@ export function MapViewExplore({
             setPreviewDeltaTheta(fanConfig.deltaTheta);
         }
 
-        const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+        const handleMouseMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+            // Prevent page scrolling/panning during adjustment
+            if (e.originalEvent) {
+                // e.originalEvent.preventDefault();
+            }
+            if (!e.lngLat) return;
             const centerAz = calculateAzimuth(sourceLocation, targetLocation);
             const mouseAz = calculateAzimuth(sourceLocation, { lng: e.lngLat.lng, lat: e.lngLat.lat });
             let diff = Math.abs(mouseAz - centerAz);
@@ -1090,6 +1221,7 @@ export function MapViewExplore({
         };
 
         const handleClick = () => {
+            if (Date.now() - lastStepChangeTimeRef.current < 200) return;
             if (previewDeltaTheta !== null) {
                 fanDeltaThetaRef.current = previewDeltaTheta;
                 setFanConfig(prev => ({ ...prev, deltaTheta: previewDeltaTheta }));
@@ -1098,15 +1230,23 @@ export function MapViewExplore({
         };
 
         map.on('mousemove', handleMouseMove);
+        map.on('touchmove', handleMouseMove);
         map.on('click', handleClick);
         map.getCanvas().style.cursor = 'col-resize';
+        
+        // Disable map movement while adjusting on mobile
+        map.dragPan.disable();
+        map.touchZoomRotate.disable();
 
         return () => {
             map.off('mousemove', handleMouseMove);
+            map.off('touchmove', handleMouseMove);
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
+            map.dragPan.enable();
+            map.touchZoomRotate.enable();
         };
-    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode, mode]);
+    }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode, mode, handleSetScanStep]);
 
 
     // Execute Scan Logic (Manual Trigger)
@@ -1161,7 +1301,12 @@ export function MapViewExplore({
                 onProfileChange(profile);
             }
 
-            setScanStep('selecting_target');
+            // スキャン完了後の遷移
+            if (scanMode === '360') {
+                handleSetScanStep('complete');
+            } else {
+                handleSetScanStep('selecting_target');
+            }
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to execute scan';
             setError(message);
@@ -1353,10 +1498,87 @@ export function MapViewExplore({
 
     // Double-click is reserved for source selection.
 
-    return (
-        <div className="relative w-full h-full">
-            <div ref={containerRef} className="w-full h-full" />
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
+    return (
+        <div className="relative w-full h-full text-white">
+            <div 
+                ref={containerRef} 
+                className="w-full h-full transition-opacity duration-300 touch-none" 
+            />
+
+            {/* Center Crosshair for Mobile selection - Simple, Small & Thick */}
+            {isMobile && (scanStep === 'idle' || scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[3500]">
+                    <div className="relative w-8 h-8 flex items-center justify-center">
+                        <div className="absolute w-full h-[2px] bg-white/90 shadow-[0_0_4px_rgba(0,0,0,0.5)]" />
+                        <div className="absolute h-full w-[2px] bg-white/90 shadow-[0_0_4px_rgba(0,0,0,0.5)]" />
+                    </div>
+                </div>
+            )}
+
+            {/* --- New UI Layout Structure --- */}
+
+            {/* 1. Top Bar (Search & Mode Toggle) */}
+            <TopBar
+                mode={mode}
+                onModeChange={onModeChange}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onSearchSubmit={() => handleSearch(searchQuery)}
+                isSearching={isSearching}
+                searchResults={searchResults}
+                showResults={showResults}
+                onSelectResult={handleSelectResult}
+                onCloseResults={() => setShowResults(false)}
+                onFocusSearch={() => searchResults.length > 0 && setShowResults(true)}
+                guidance={currentGuidance}
+                onStepClick={handleStepClick}
+                fanConfig={fanConfig}
+                onFanConfigChange={setFanConfig}
+            />
+
+            {/* 2. Side Panel / Bottom Sheet (Contextual Details) */}
+            <LayerMenu 
+                isOpen={isLayerMenuOpen} 
+                onToggle={() => setIsLayerMenuOpen(prev => !prev)}
+            >
+                {mode === 'explore' ? (
+                    <ScanControlPanel
+                        scanMode={scanMode}
+                        onScanModeChange={handleScanModeChange}
+                        scanStatus={{
+                            scanStep,
+                            loading,
+                            error,
+                            rayResult,
+                            previewDeltaTheta,
+                            deltaTheta: fanConfig.deltaTheta
+                        }}
+                        onResetScan={reset}
+                        profile={profile}
+                        onProfileHover={onProfileHover}
+                        onProfileClick={onProfileClick}
+                    />
+                ) : (
+                    <PostListPanel
+                        posts={posts}
+                        // isLoading={isPostsLoading} // TODO: Add loading state to postsApi
+                        onPostClick={(post) => {
+                           map?.flyTo({
+                               center: [post.location.lng, post.location.lat],
+                               zoom: 16,
+                               duration: 1200
+                           });
+                           if (isLayerMenuOpen && window.innerWidth < 768) {
+                               setIsLayerMenuOpen(false); // Mobile: close sheet to see map
+                           }
+                        }}
+                    />
+                )}
+            </LayerMenu>
+
+            {/* Map Visuals */}
             <MapOverlays
                 map={map}
                 sourceLocation={sourceLocation}
@@ -1373,7 +1595,6 @@ export function MapViewExplore({
                 }
                 previewRangeM={scanMode === '360' && scanStep === 'adjusting_range' ? previewRangeM : null}
                 preferPreview={scanStep === 'adjusting_angle'}
-                showTargetRing={scanStep === 'adjusting_angle'}
                 viirsPoints={viirsPoints}
                 posts={posts}
                 hoveredPostId={hoveredPostId}
@@ -1390,59 +1611,7 @@ export function MapViewExplore({
             />
 
             {/* Bottom Right Controls */}
-            <div className="absolute bottom-6 right-6 flex items-end gap-4 md:bottom-8 md:right-8 z-50 pointer-events-auto">
-                <button
-                    ref={settingsButtonRef}
-                    type="button"
-                    onClick={() => setIsSettingsOpen((prev) => !prev)}
-                    className="group bg-black/60 backdrop-blur-md border border-yellow-300/60 text-white rounded-full shadow-lg p-3 hover:bg-white/10 hover:border-yellow-200 active:scale-95 transition-all duration-200 flex items-center justify-center"
-                    aria-label="設定"
-                    aria-pressed={isSettingsOpen}
-                >
-                    <span className="text-xl">⚙️</span>
-                </button>
-                {isSettingsOpen && (
-                    <div
-                        ref={settingsPanelRef}
-                        className="absolute right-20 bottom-0 w-56 rounded-xl border border-white/10 bg-black/70 p-3 shadow-lg backdrop-blur-md"
-                    >
-                        <div className="text-xs text-white/60">Ray Count</div>
-                        <div className="mt-2 flex items-center justify-between text-sm text-white/80">
-                            <span>{fanConfig.rayCount}</span>
-                            <span className="text-white/60">rays</span>
-                        </div>
-                        <div className="mt-3 text-xs text-white/60">Ray Spacing</div>
-                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs font-semibold">
-                            {[
-                                { label: '詳細', value: 10 },
-                                { label: 'ノーマル', value: 30 },
-                                { label: 'あらめ', value: 60 },
-                            ].map((preset) => (
-                                <button
-                                    key={preset.value}
-                                    type="button"
-                                    onClick={() => {
-                                        fanDeltaThetaRef.current = preset.value;
-                                        setFanConfig((prev) => ({
-                                            ...prev,
-                                            deltaTheta: preset.value,
-                                        }));
-                                    }}
-                                    className={`rounded-full px-2 py-1 transition-colors ${fanConfig.deltaTheta === preset.value
-                                        ? 'bg-yellow-400 text-black'
-                                        : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
-                                        }`}
-                                >
-                                    {preset.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="mt-1 text-[11px] text-white/50">
-                            {fanConfig.deltaTheta}° 間隔
-                        </div>
-                    </div>
-                )}
-
+            <div className="absolute bottom-6 right-6 flex items-end gap-4 md:bottom-8 md:right-8 z-[5000] pointer-events-auto">
                 <div className="relative flex flex-col items-end gap-2">
                     {/* 投稿ボタン */}
                     <button
@@ -1455,7 +1624,7 @@ export function MapViewExplore({
                         disabled={!isSupabaseConfigured}
                         title={isSupabaseConfigured ? '投稿する' : 'Supabase未設定'}
                     >
-                        <span className="text-lg">📸</span>
+                        <Camera className="w-5 h-5 text-yellow-400 group-hover:scale-110 transition-transform" />
                     </button>
                     {isPostModalOpen && (
                         <div
@@ -1536,17 +1705,6 @@ export function MapViewExplore({
                                                 <div className="flex gap-2">
                                                     <button
                                                         type="button"
-                                                        onClick={() => setPostLocationMode('center')}
-                                                        className={`flex-1 rounded-lg border py-2 text-xs transition-all ${
-                                                            postLocationMode === 'center'
-                                                                ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
-                                                                : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
-                                                        }`}
-                                                    >
-                                                        🗺️ 地図中心
-                                                    </button>
-                                                    <button
-                                                        type="button"
                                                         onClick={() => setPostLocationMode('current')}
                                                         disabled={!currentLocation}
                                                         className={`flex-1 rounded-lg border py-2 text-xs transition-all ${
@@ -1590,7 +1748,7 @@ export function MapViewExplore({
                                                     setPostMessage('');
                                                     setPostPhotoUrl('');
                                                     setPostPhotoFile(null);
-                                                    setPostLocationMode('center');
+                                                    setPostLocationMode('current');
                                                     setPostPinLocation(null);
                                                 }}
                                                 className="flex-1 rounded-lg border border-white/10 bg-white/5 py-2 text-sm text-white/70 hover:bg-white/10"
@@ -1617,7 +1775,7 @@ export function MapViewExplore({
                         aria-label="VIIRS設定"
                         aria-pressed={isViirsPanelOpen}
                     >
-                        <span className="text-lg">🗺️</span>
+                        <Layers className="w-5 h-5 text-white/90 group-hover:scale-110 transition-transform" />
                     </button>
                     {isViirsPanelOpen && (
                         <div

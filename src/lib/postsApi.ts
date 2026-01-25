@@ -73,7 +73,7 @@ export type Post = {
     photos: { url: string }[];
     author: { id: string; name: string; avatarUrl?: string };
     createdAt: string;
-    source: 'supabase' | 'mock';
+    source?: 'supabase' | 'mock';
 };
 
 // DB行 → フロント用 Post に変換

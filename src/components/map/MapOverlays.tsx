@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
@@ -30,7 +30,6 @@ type MapOverlaysProps = {
     } | null;
     previewRangeM?: number | null;
     preferPreview?: boolean;
-    showTargetRing?: boolean;
     targetRingState?: TargetRingState;
     viirsPoints?: ViirsPoint[];
     posts?: Post[];
@@ -52,7 +51,6 @@ export function MapOverlays({
     previewFanConfig,
     previewRangeM,
     preferPreview,
-    showTargetRing,
     targetRingState,
     viirsPoints,
     posts = [],
@@ -61,9 +59,6 @@ export function MapOverlays({
     visiblePosts = false,
 }: MapOverlaysProps) {
     const overlayRef = useRef<MapboxOverlay | null>(null);
-    const isDraggingRef = useRef(false);
-    const pointerIdRef = useRef<number | null>(null);
-    const [ringPosition, setRingPosition] = useState<{ x: number; y: number } | null>(null);
     const targetRingStateRef = useRef<TargetRingState | null>(null);
 
     // フェードイン用の状態
@@ -160,19 +155,6 @@ export function MapOverlays({
         targetRingStateRef.current = targetRingState ?? null;
     }, [targetRingState]);
 
-    const calculateAzimuth = (start: LngLat, end: LngLat): number => {
-        const lat1 = (start.lat * Math.PI) / 180;
-        const lat2 = (end.lat * Math.PI) / 180;
-        const deltaLng = ((end.lng - start.lng) * Math.PI) / 180;
-
-        const y = Math.sin(deltaLng) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) -
-            Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
-
-        const bearing = Math.atan2(y, x);
-        return ((bearing * 180) / Math.PI + 360) % 360;
-    };
-
     const calculateEndpoint = (start: LngLat, azimuthDeg: number, distanceM: number): LngLat => {
         const R = 6371000;
         const bearing = (azimuthDeg * Math.PI) / 180;
@@ -194,31 +176,6 @@ export function MapOverlays({
             lng: (lng2 * 180) / Math.PI,
         };
     };
-
-    useEffect(() => {
-        if (!map || !showTargetRing || !sourceLocation) {
-            setRingPosition(null);
-            return;
-        }
-
-        const updatePosition = () => {
-            const pos = map.project([sourceLocation.lng, sourceLocation.lat]);
-            setRingPosition({ x: pos.x, y: pos.y });
-        };
-
-        updatePosition();
-        map.on('move', updatePosition);
-        map.on('zoom', updatePosition);
-        map.on('rotate', updatePosition);
-        map.on('resize', updatePosition);
-
-        return () => {
-            map.off('move', updatePosition);
-            map.off('zoom', updatePosition);
-            map.off('rotate', updatePosition);
-            map.off('resize', updatePosition);
-        };
-    }, [map, showTargetRing, sourceLocation]);
 
     // VIIRS Layers
     const viirsLayers = useMemo(() => {
@@ -292,7 +249,7 @@ export function MapOverlays({
                 getRadius: 6,
                 parameters: {
                     depthTest: false
-                },
+                } as any,
                 onHover: info => {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const id = info.object ? (info.object as any).id : null;
@@ -598,9 +555,7 @@ export function MapOverlays({
                     return [endLng, endLat, endZ] as [number, number, number];
                 };
 
-                const pLeft = drawPreviewRay(centerAzimuth - deltaTheta / 2, false);
                 const pCenter = drawPreviewRay(centerAzimuth, true);
-                const pRight = drawPreviewRay(centerAzimuth + deltaTheta / 2, false);
 
                 // Arc along preview radius instead of triangular rim
                 const arcSegs: {
@@ -787,61 +742,6 @@ export function MapOverlays({
             });
         }
     }, [map, sourceLocation, currentLocation, targetLocation, profile, hoveredIndex]);
-
-    const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-        const ringState = targetRingStateRef.current;
-        if (!map || !sourceLocation || !targetLocation || !ringState || !isDraggingRef.current) return;
-
-        const rect = map.getContainer().getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
-        const lngLat = map.unproject([x, y]);
-
-        const centerAz = calculateAzimuth(sourceLocation, targetLocation);
-        const mouseAz = calculateAzimuth(sourceLocation, { lng: lngLat.lng, lat: lngLat.lat });
-        let diff = Math.abs(mouseAz - centerAz);
-        if (diff > 180) diff = 360 - diff;
-
-        const newDelta = Math.max(1, Math.min(360, diff * 2));
-        if (ringState.previewDeltaTheta !== newDelta) {
-            ringState.setPreviewDeltaTheta(newDelta);
-        }
-    };
-
-    const handlePointerUp = () => {
-        const ringState = targetRingStateRef.current;
-        if (!ringState || !isDraggingRef.current) return;
-
-        isDraggingRef.current = false;
-        if (ringState.previewDeltaTheta !== null) {
-            ringState.onCommitDeltaTheta(ringState.previewDeltaTheta);
-        }
-    };
-
-    useEffect(() => {
-        if (!map || !showTargetRing || !sourceLocation || !targetLocation) return;
-
-        const handleMouseMove = (event: maplibregl.MapMouseEvent) => {
-            const ringState = targetRingStateRef.current;
-            if (!ringState) return;
-            const lngLat = event.lngLat;
-            const centerAz = calculateAzimuth(sourceLocation, targetLocation);
-            const mouseAz = calculateAzimuth(sourceLocation, { lng: lngLat.lng, lat: lngLat.lat });
-            let diff = Math.abs(mouseAz - centerAz);
-            if (diff > 180) diff = 360 - diff;
-
-            const newDelta = Math.max(1, Math.min(360, diff * 2));
-            if (ringState.previewDeltaTheta !== newDelta) {
-                ringState.setPreviewDeltaTheta(newDelta);
-            }
-        };
-
-        map.on('mousemove', handleMouseMove);
-
-        return () => {
-            map.off('mousemove', handleMouseMove);
-        };
-    }, [map, showTargetRing, sourceLocation, targetLocation]);
 
     return (
         <div className="absolute inset-0 pointer-events-none z-30" />
