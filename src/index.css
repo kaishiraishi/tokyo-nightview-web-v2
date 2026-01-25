@@ -104,3 +104,8 @@ body {
         transform: translateY(0);
     }
 }
+
+/* Ensure popups are always above Deck.gl overlay */
+.maplibregl-popup {
+    z-index: 2000 !important;
+}

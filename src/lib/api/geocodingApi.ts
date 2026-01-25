@@ -1,14 +1,21 @@
-// Nominatim (OpenStreetMap) ジオコーディングAPI
-// 利用規約: https://operations.osmfoundation.org/policies/nominatim/
+// Nominatim (OpenStreetMap) Geocoding API
+// Terms: https://operations.osmfoundation.org/policies/nominatim/
 
 export type GeocodingResult = {
     displayName: string;
     lat: number;
     lng: number;
     boundingBox: [number, number, number, number]; // [south, north, west, east]
+    type?: string;
+    class?: string;
 };
 
 const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
+
+// Tokyo Bounding Box (approx) for 'bounded=1'
+// minLon, minLat, maxLon, maxLat
+// 138.9, 35.5, 139.9, 35.9 (Roughly Tokyo 23 wards + some surroundings)
+const TOKYO_VIEWBOX = '138.9,35.5,139.9,35.9';
 
 export async function searchLocation(query: string): Promise<GeocodingResult[]> {
     if (!query.trim()) return [];
@@ -18,33 +25,40 @@ export async function searchLocation(query: string): Promise<GeocodingResult[]> 
         format: 'json',
         addressdetails: '1',
         limit: '5',
-        // 日本中心で検索（必要に応じて調整）
-        viewbox: '122.93,24.04,153.99,45.55',
-        bounded: '0',
+        // 1. Japan Fixed
+        countrycodes: 'jp',
+        // 2. Language
+        'accept-language': 'ja',
+        // 3. Viewbox & Bounded
+        viewbox: TOKYO_VIEWBOX,
+        bounded: '1',
     });
 
-    const response = await fetch(`${NOMINATIM_BASE}/search?${params}`, {
-        headers: {
-            // Nominatim利用規約: User-Agentを明示
-            'User-Agent': 'TokyoNightviewWeb/1.0',
-        },
-    });
+    try {
+        const response = await fetch(`${NOMINATIM_BASE}/search?${params}`, {
+            headers: {
+                // Required by Nominatim Terms
+                'User-Agent': 'TokyoNightviewWeb/1.0',
+            },
+        });
 
-    if (!response.ok) {
-        throw new Error(`Geocoding failed: ${response.status}`);
+        if (!response.ok) {
+            throw new Error(`Geocoding failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return data.map((item: any) => ({
+            displayName: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+            boundingBox: item.boundingbox.map(Number) as [number, number, number, number],
+            type: item.type,
+            class: item.class,
+        }));
+    } catch (error) {
+        console.error('Nominatim search error:', error);
+        return [];
     }
-
-    const data = await response.json();
-
-    return data.map((item: {
-        display_name: string;
-        lat: string;
-        lon: string;
-        boundingbox: [string, string, string, string];
-    }) => ({
-        displayName: item.display_name,
-        lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon),
-        boundingBox: item.boundingbox.map(Number) as [number, number, number, number],
-    }));
 }

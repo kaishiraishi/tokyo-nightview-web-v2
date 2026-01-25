@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, useMemo, type PointerEvent } from 'react';
 import type maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
@@ -6,6 +6,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { GL } from '@luma.gl/constants';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
 import type { ViirsPoint } from '../../lib/viirsSampler';
+import type { Post } from '../../lib/postsApi';
 
 type TargetRingState = {
     previewDeltaTheta: number | null;
@@ -32,6 +33,10 @@ type MapOverlaysProps = {
     showTargetRing?: boolean;
     targetRingState?: TargetRingState;
     viirsPoints?: ViirsPoint[];
+    posts?: Post[];
+    hoveredPostId?: string | null;
+    onPostHover?: (id: string | null) => void;
+    visiblePosts?: boolean;
 };
 
 export function MapOverlays({
@@ -50,6 +55,10 @@ export function MapOverlays({
     showTargetRing,
     targetRingState,
     viirsPoints,
+    posts = [],
+    hoveredPostId = null,
+    onPostHover,
+    visiblePosts = false,
 }: MapOverlaysProps) {
     const overlayRef = useRef<MapboxOverlay | null>(null);
     const isDraggingRef = useRef(false);
@@ -123,9 +132,7 @@ export function MapOverlays({
         if (!map) return;
         if (overlayRef.current) return;
 
-        // Use interleaved: false for easier debugging (overlay mode)
         const overlay = new MapboxOverlay({
-            interleaved: false,
             layers: []
         });
 
@@ -213,15 +220,102 @@ export function MapOverlays({
         };
     }, [map, showTargetRing, sourceLocation]);
 
-    // Update Deck.gl layers (Rays & Hit Points & Anchors)
-    useEffect(() => {
-        if (!overlayRef.current || !map) return;
+    // VIIRS Layers
+    const viirsLayers = useMemo(() => {
+        const particleData = viirsPoints ?? [];
+        if (particleData.length === 0) return [];
+        return [
+            new ScatterplotLayer<ViirsPoint>({
+                id: 'night-particles-halo',
+                data: particleData,
+                pickable: false,
+                opacity: 0.9 * viirsOpacity,
+                radiusUnits: 'pixels',
+                billboard: true,
+                stroked: false,
+                filled: true,
+                getPosition: d => d.position,
+                getRadius: d => 2 + d.intensity * 5,
+                radiusMinPixels: 1,
+                radiusMaxPixels: 8,
+                getFillColor: d => {
+                    const a = Math.round((10 + d.intensity * 22) * viirsOpacity);
+                    return [255, 235, 190, a];
+                },
+                updateTriggers: {
+                    getFillColor: viirsOpacity,
+                },
+                parameters: glowBlendParams,
+            }),
+            new ScatterplotLayer<ViirsPoint>({
+                id: 'night-particles-core',
+                data: particleData,
+                pickable: false,
+                opacity: viirsOpacity,
+                radiusUnits: 'pixels',
+                billboard: true,
+                stroked: false,
+                filled: true,
+                getPosition: d => d.position,
+                getRadius: d => 0.8 + d.intensity * 1.4,
+                radiusMinPixels: 0.6,
+                radiusMaxPixels: 3,
+                getFillColor: d => {
+                    const a = Math.round((70 + d.intensity * 90) * viirsOpacity);
+                    return [255, 255, 255, a];
+                },
+                updateTriggers: {
+                    getFillColor: viirsOpacity,
+                },
+                parameters: glowBlendParams,
+            })
+        ];
+    }, [viirsPoints, viirsOpacity, glowBlendParams]);
 
+    // Posts Layers
+    const postsLayers = useMemo(() => {
+        if (!visiblePosts || !posts || posts.length === 0) return [];
+        return [
+            new ScatterplotLayer<Post>({
+                id: 'posts-deck-layer',
+                data: posts,
+                pickable: true,
+                stroked: true,
+                filled: true,
+                radiusUnits: 'pixels',
+                radiusMinPixels: 6,
+                radiusMaxPixels: 20,
+                getPosition: d => [d.location.lng, d.location.lat],
+                getFillColor: [245, 158, 11], // #f59e0b
+                getLineColor: [17, 24, 39], // #111827
+                getLineWidth: 2,
+                getRadius: 6,
+                parameters: {
+                    depthTest: false
+                },
+                onHover: info => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const id = info.object ? (info.object as any).id : null;
+                    if (onPostHover) onPostHover(id ? String(id) : null);
+                },
+                onClick: info => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const id = info.object ? (info.object as any).id : null;
+                    if (onPostHover && id) onPostHover(String(id));
+                }
+            })
+        ];
+    }, [posts, hoveredPostId, visiblePosts, onPostHover]);
+
+    // Scan/Line Layers
+    const scanLayers = useMemo(() => {
+        if (!map) return [];
+        
         const rays: any[] = [];
         const hits: any[] = [];
-        const anchors: any[] = []; // ✅ Deck marker anchors
-        const rayEnds: any[] = []; // ✅ Ray endpoint visualization
-        let rimSegs: Array<{ source: [number, number, number], target: [number, number, number], color: [number, number, number, number] }> = [];  // ✅ Rim arc segments
+        const anchors: any[] = [];
+        const rayEnds: any[] = [];
+        let rimSegs: Array<{ source: [number, number, number], target: [number, number, number], color: [number, number, number, number] }> = [];
 
         const terrainZ = (lng: number, lat: number): number | null => {
             const fn = (map as any).queryTerrainElevation;
@@ -278,8 +372,8 @@ export function MapOverlays({
 
         if (isFanMode) {
             if (!sourceLocation) {
-                overlayRef.current.setProps({ layers: [] });
-                return;
+                // overlayRef.current.setProps({ layers: [] });
+                return [];
             }
 
             const startLng = sourceLocation.lng;
@@ -567,59 +661,7 @@ export function MapOverlays({
             }
         }
 
-        const layers = [];
-        const particleData = viirsPoints ?? [];
-
-        if (particleData.length > 0) {
-            layers.push(
-                new ScatterplotLayer<ViirsPoint>({
-                    id: 'night-particles-halo',
-                    data: particleData,
-                    pickable: false,
-                    opacity: 0.9 * viirsOpacity, // フェードイン適用
-                    radiusUnits: 'pixels',
-                    billboard: true,
-                    stroked: false,
-                    filled: true,
-                    getPosition: d => d.position,
-                    getRadius: d => 2 + d.intensity * 5,
-                    radiusMinPixels: 1,
-                    radiusMaxPixels: 8,
-                    getFillColor: d => {
-                        const a = Math.round((10 + d.intensity * 22) * viirsOpacity);
-                        return [255, 235, 190, a];
-                    },
-                    updateTriggers: {
-                        getFillColor: viirsOpacity,
-                    },
-                    parameters: glowBlendParams,
-                }),
-                new ScatterplotLayer<ViirsPoint>({
-                    id: 'night-particles-core',
-                    data: particleData,
-                    pickable: false,
-                    opacity: viirsOpacity, // フェードイン適用
-                    radiusUnits: 'pixels',
-                    billboard: true,
-                    stroked: false,
-                    filled: true,
-                    getPosition: d => d.position,
-                    getRadius: d => 0.8 + d.intensity * 1.4,
-                    radiusMinPixels: 0.6,
-                    radiusMaxPixels: 3,
-                    getFillColor: d => {
-                        const a = Math.round((70 + d.intensity * 90) * viirsOpacity);
-                        return [255, 255, 255, a];
-                    },
-                    updateTriggers: {
-                        getFillColor: viirsOpacity,
-                    },
-                    parameters: glowBlendParams,
-                })
-            );
-        }
-
-        layers.push(
+        return [
             new LineLayer({
                 id: 'fan-rim',
                 data: rimSegs,
@@ -668,9 +710,7 @@ export function MapOverlays({
                 getLineWidth: 3,
                 parameters: { depthTest: false },
             }),
-        );
-
-        overlayRef.current.setProps({ layers });
+        ];
     }, [
         isFanMode,
         fanRayResults,
@@ -679,12 +719,25 @@ export function MapOverlays({
         sourceLocation,
         targetLocation,
         previewFanConfig,
-        previewRangeM,
-        glowBlendParams,
-        viirsPoints,
-        viirsOpacity, // フェードイン用
+        previewRangeM
     ]);
 
+    // Unified Layer Update
+    useEffect(() => {
+        if (!overlayRef.current) return;
+        
+        // 描画順序: VIIRS(背景) -> Posts(中間) -> Scan(最前面)
+        // ※ Deck.glは配列の後ろにあるものが手前に描画されますが、
+        // 3D空間では深度テスト(depthTest)が有効ならZ座標次第です。
+        // Postsは今回 depthTest: false にしたので、間違いなく描画順で手前に来ます。
+        overlayRef.current.setProps({
+            layers: [
+                ...viirsLayers,
+                ...postsLayers,
+                ...scanLayers
+            ]
+        });
+    }, [viirsLayers, postsLayers, scanLayers]);
 
     // Update GeoJSON markers (Source, Target, Current, Hover)
     useEffect(() => {

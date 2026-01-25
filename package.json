@@ -19,6 +19,7 @@
         "@deck.gl/mapbox": "^9.2.5",
         "@loaders.gl/3d-tiles": "^4.3.4",
         "@luma.gl/constants": "^9.2.6",
+        "@supabase/supabase-js": "^2.91.1",
         "lucide-react": "^0.562.0",
         "maplibre-gl": "^5.0.0",
         "maplibre-gl-gsi-terrain": "^2.3.0",

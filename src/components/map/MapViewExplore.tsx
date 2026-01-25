@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import { useMapLibre } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
@@ -10,7 +10,9 @@ import { CurrentLocationButton } from '../ui/CurrentLocationButton';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import type { FanConfig, ScanMode, ScanStep } from './types';
-import { MOCK_POSTS, type Post } from '../../data/mockPosts';
+import { MOCK_POSTS } from '../../data/mockPosts';
+import { listPosts, createPost, uploadPhoto, type Post } from '../../lib/postsApi';
+import { isSupabaseConfigured } from '../../lib/supabaseClient';
 
 const NORTH_THRESHOLD_DEG = 5;
 const SIGHT_ANGLE_PRESETS = {
@@ -111,11 +113,48 @@ export function MapViewExplore({
     });
     const [fanRayResults, setFanRayResults] = useState<FanRayResult[]>([]);
     const postsPopupCloseTimerRef = useRef<number | null>(null);
+    const [hoveredPostId, setHoveredPostId] = useState<string | null>(null);
     const hoveredPostIdRef = useRef<string | number | null>(null);
     const postPopupsRef = useRef<Map<string, maplibregl.Popup>>(new Map());
+    
+    // Handler for Deck.gl Post Hover
+    const handlePostHover = useCallback((id: string | null) => {
+        if (mode !== 'analyze' || !map) return;
+        
+        if (postsPopupCloseTimerRef.current != null) {
+            window.clearTimeout(postsPopupCloseTimerRef.current);
+            postsPopupCloseTimerRef.current = null;
+        }
+
+        if (id) {
+            map.getCanvas().style.cursor = 'pointer';
+            setHoveredPostId(id);
+            hoveredPostIdRef.current = id;
+        } else {
+            map.getCanvas().style.cursor = '';
+            postsPopupCloseTimerRef.current = window.setTimeout(() => {
+                setHoveredPostId(null);
+                hoveredPostIdRef.current = null;
+            }, 180);
+        }
+    }, [map, mode]);
+
     const postPopupExpandedRef = useRef<Map<string, boolean>>(new Map());
     const isZoomExpandedRef = useRef<boolean | null>(null);
     const POSTS_IMAGE_ZOOM_THRESHOLD = 13;
+
+    // Posts state (Supabase + MOCK_POSTS)
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+    const [postMessage, setPostMessage] = useState('');
+    const [postPhotoUrl, setPostPhotoUrl] = useState('');
+    const [postPhotoFile, setPostPhotoFile] = useState<File | null>(null);
+    const [isPosting, setIsPosting] = useState(false);
+    const [postLocationMode, setPostLocationMode] = useState<'center' | 'current' | 'pin'>('center');
+    const [postPinLocation, setPostPinLocation] = useState<{ lat: number; lng: number } | null>(null);
+    const [isPinSelecting, setIsPinSelecting] = useState(false);
+    const postModalRef = useRef<HTMLDivElement | null>(null);
+    const postButtonRef = useRef<HTMLButtonElement | null>(null);
 
     // VIIRS controls
     const [viirsEnabled, setViirsEnabled] = useState(true);
@@ -125,6 +164,9 @@ export function MapViewExplore({
     const viirsButtonRef = useRef<HTMLButtonElement | null>(null);
     const viirsUpdateTimerRef = useRef<number | null>(null);
     const viirsRequestIdRef = useRef(0);
+
+    // Aerial Photo controls
+    const [aerialEnabled, setAerialEnabled] = useState(false);
 
     // Ray-based occlusion detection with sight angle α
     function findFirstOcclusion(
@@ -255,7 +297,7 @@ export function MapViewExplore({
     }
 
     // Calculate endpoint given start point, azimuth (degrees), and distance (meters)
-function calculateEndpoint(start: LngLat, azimuthDeg: number, distanceM: number): LngLat {
+    function calculateEndpoint(start: LngLat, azimuthDeg: number, distanceM: number): LngLat {
         const R = 6371000; // Earth radius in meters
         const bearing = (azimuthDeg * Math.PI) / 180;
         const lat1 = (start.lat * Math.PI) / 180;
@@ -271,41 +313,142 @@ function calculateEndpoint(start: LngLat, azimuthDeg: number, distanceM: number)
             Math.cos(distanceM / R) - Math.sin(lat1) * Math.sin(lat2)
         );
 
-    return {
-        lat: (lat2 * 180) / Math.PI,
-        lng: (lng2 * 180) / Math.PI,
-    };
-}
+        return {
+            lat: (lat2 * 180) / Math.PI,
+            lng: (lng2 * 180) / Math.PI,
+        };
+    }
 
-function escapeHtml(s: string) {
-    return s
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
+    function escapeHtml(s: string) {
+        return s
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
 
-function buildPostPopupHtml(post: Post, expanded: boolean) {
-    const caption = escapeHtml(post.caption ?? '');
-    const placeName = escapeHtml(post.location.placeName ?? '');
-    const areaText = post.location.area ? `・${escapeHtml(post.location.area)}` : '';
-    const authorName = post.author?.name ? `<div class="night-popup-author">@${escapeHtml(post.author.name)}</div>` : '';
-    const photoUrl = post.photos?.[0]?.url ?? '';
+    function buildPostPopupHtml(post: Post, expanded: boolean) {
+        const caption = escapeHtml(post.caption ?? '');
+        const placeName = escapeHtml(post.location.placeName ?? '');
+        const areaText = post.location.area ? `・${escapeHtml(post.location.area)}` : '';
+        const authorName = post.author?.name ? `<div class="night-popup-author">@${escapeHtml(post.author.name)}</div>` : '';
+        const photoUrl = post.photos?.[0]?.url ?? '';
+        
+        // 簡易表示（ズーム前）: テキストのみ
+        if (!expanded) {
+             return `
+              <div class="night-popup-card night-popup-simple">
+                <div class="night-popup-caption" style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;">${caption}</div>
+              </div>
+            `;
+        }
 
-    return `
+        // 詳細表示（ズーム後）
+        return `
       <div class="night-popup-card">
-        ${
-            expanded && photoUrl
+        ${photoUrl
                 ? `<img class="night-popup-img" src="${photoUrl}" alt="" loading="lazy" decoding="async" width="240" height="132" />`
                 : ''
-        }
+            }
         <div class="night-popup-caption">${caption}</div>
-        ${expanded ? `<div class="night-popup-meta">${placeName}${areaText}</div>` : ''}
-        ${expanded ? authorName : ''}
+        <div class="night-popup-meta">${placeName}${areaText}</div>
+        ${authorName}
       </div>
     `;
-}
+    }
+
+    // Posts取得（Supabase + MOCK_POSTSをマージ）
+    const loadPosts = useCallback(async () => {
+        // MOCK_POSTSを既存のPost型に変換
+        const mockPostsConverted: Post[] = MOCK_POSTS.map((p) => ({
+            id: p.id,
+            location: p.location,
+            caption: p.caption,
+            photos: p.photos,
+            author: p.author,
+            createdAt: p.createdAt,
+            source: 'mock' as const,
+        }));
+
+        if (!isSupabaseConfigured) {
+            // Supabase未設定ならMOCK_POSTSのみ
+            setPosts(mockPostsConverted);
+            return;
+        }
+
+        try {
+            const supabasePosts = await listPosts();
+            // Supabaseの投稿を先頭、その後にMOCK_POSTS
+            setPosts([...supabasePosts, ...mockPostsConverted]);
+        } catch (err) {
+            console.error('[loadPosts] エラー:', err);
+            setPosts(mockPostsConverted);
+        }
+    }, []);
+
+    // 投稿送信
+    const handleSubmitPost = useCallback(async () => {
+        if (!postMessage.trim()) return;
+        if (!map) return;
+
+        setIsPosting(true);
+        try {
+            // 投稿場所を決定
+            let postLat: number;
+            let postLng: number;
+
+            if (postLocationMode === 'pin' && postPinLocation) {
+                postLat = postPinLocation.lat;
+                postLng = postPinLocation.lng;
+            } else if (postLocationMode === 'current' && currentLocation) {
+                postLat = currentLocation.lat;
+                postLng = currentLocation.lng;
+            } else {
+                const center = map.getCenter();
+                postLat = center.lat;
+                postLng = center.lng;
+            }
+
+            let finalPhotoUrl = postPhotoUrl.trim();
+
+            // 画像ファイルが選択されている場合はアップロード
+            if (postPhotoFile) {
+                const uploadedUrl = await uploadPhoto(postPhotoFile);
+                if (uploadedUrl) {
+                    finalPhotoUrl = uploadedUrl;
+                }
+            }
+
+            const newPost = await createPost({
+                message: postMessage.trim(),
+                photoUrl: finalPhotoUrl || undefined,
+                lat: postLat,
+                lng: postLng,
+            });
+
+            if (newPost) {
+                // 成功したら一覧を再取得
+                await loadPosts();
+                // フォームリセット
+                setPostMessage('');
+                setPostPhotoUrl('');
+                setPostPhotoFile(null);
+                setPostLocationMode('center');
+                setPostPinLocation(null);
+                setIsPostModalOpen(false);
+            }
+        } catch (err) {
+            console.error('[handleSubmitPost] エラー:', err);
+        } finally {
+            setIsPosting(false);
+        }
+    }, [postMessage, postPhotoUrl, postPhotoFile, postLocationMode, postPinLocation, currentLocation, map, loadPosts]);
+
+    // 初回マウント時にposts取得
+    useEffect(() => {
+        void loadPosts();
+    }, [loadPosts]);
 
     // Generate fan of rays and calculate occlusion for each
     async function generateFanRays(
@@ -448,62 +591,63 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
         let isActive = true;
         let prevStride: number | null = null;
 
-    const update = async () => {
-        const requestId = ++viirsRequestIdRef.current;
-        const bounds = map.getBounds();
-        const currentZoom = map.getZoom();
+        const update = async () => {
+            const requestId = ++viirsRequestIdRef.current;
+            const bounds = map.getBounds();
+            const currentZoom = map.getZoom();
 
-        // ズームレベルに応じてサンプリングパラメータを調整
-        // ズームアウトするほど stride を大きく、maxPoints を小さくして間引く
-        let stride: number;
-        let maxPoints: number;
-        let maxPointsPerTile: number;
-        let emit: number;
+            // ズームレベルに応じてサンプリングパラメータを調整
+            // ズームアウトするほど stride を大きく、maxPoints を小さくして間引く
+            let stride: number;
+            let maxPoints: number;
+            let maxPointsPerTile: number;
+            let emit: number;
 
-        if (currentZoom >= 14) {
-            // 高ズーム: 高密度
-            stride = 1;
-            maxPoints = 300000;
-            maxPointsPerTile = 15000;
-            emit = 8;
-        } else if (currentZoom >= 12) {
-            // 中ズーム: 標準密度
-            stride = 2;
-            maxPoints = 200000;
-            maxPointsPerTile = 12000;
-            emit = 6;
-        } else if (currentZoom >= 10) {
-            // 低ズーム: 低密度
-            stride = 4;
-            maxPoints = 150000;
-            maxPointsPerTile = 6000;
-            emit = 4;
-        } else {
-            // 超低ズーム: 最低密度
-            stride = 8;
-            maxPoints = 80000;
-            maxPointsPerTile = 3000;
-            emit = 3;
-        }
+            if (currentZoom >= 14) {
+                // 高ズーム: 高密度
+                stride = 1;
+                maxPoints = 300000;
+                maxPointsPerTile = 15000;
+                emit = 8;
+            } else if (currentZoom >= 12) {
+                // 中ズーム: 標準密度
+                stride = 2;
+                maxPoints = 200000;
+                maxPointsPerTile = 12000;
+                emit = 6;
+            } else if (currentZoom >= 10) {
+                // 低ズーム: 低密度
+                stride = 4;
+                maxPoints = 150000;
+                maxPointsPerTile = 6000;
+                emit = 4;
+            } else {
+                // 超低ズーム: 最低密度
+                stride = 8;
+                maxPoints = 80000;
+                maxPointsPerTile = 3000;
+                emit = 3;
+            }
 
-        // strideが変わった場合はキャッシュをクリア
-        if (prevStride !== null && prevStride !== stride) {
-            console.log('[VIIRS] stride changed, clearing cache:', prevStride, '->', stride);
-            clearViirsCache();
-        }
-        prevStride = stride;
+            // strideが変わった場合はキャッシュをクリア
+            if (prevStride !== null && prevStride !== stride) {
+                console.log('[VIIRS] stride changed, clearing cache:', prevStride, '->', stride);
+                clearViirsCache();
+            }
+            prevStride = stride;
 
-        console.log('[VIIRS update] zoom:', currentZoom.toFixed(1), { stride, maxPoints, maxPointsPerTile, emit });
+            console.log('[VIIRS update] zoom:', currentZoom.toFixed(1), { stride, maxPoints, maxPointsPerTile, emit });
 
-        const points = await buildViirsPoints(bounds, VIIRS_SAMPLE_Z, {
-            stride,
-            threshold: 0.02,
-            emit,
-            gamma: 1.2,
-            maxPoints,
-            maxPointsPerTile,
-            heightScale: 80,
-        });
+            const points = await buildViirsPoints(bounds, VIIRS_SAMPLE_Z, {
+                stride,
+                threshold: 0.1,  // 閾値を大幅に上げて、ノイズを完全に消す
+                emit,
+                gamma: 2.2,      // ガンマを上げて、明るい所だけを強調（メリハリ）
+                logK: 2,         // 圧縮を弱くして、都市部と山の差をそのまま出す
+                maxPoints,
+                maxPointsPerTile,
+                heightScale: 80,
+            });
             if (!isActive) return;
             if (requestId !== viirsRequestIdRef.current) return;
             setViirsPoints(points);
@@ -533,6 +677,19 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
         };
     }, [map, isLoaded, viirsEnabled]);
 
+    // Update Aerial Photo layer visibility
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+        const layerId = 'aerial-photo-layer';
+        if (map.getLayer(layerId)) {
+            map.setLayoutProperty(
+                layerId,
+                'visibility',
+                aerialEnabled ? 'visible' : 'none'
+            );
+        }
+    }, [map, isLoaded, aerialEnabled]);
+
     useEffect(() => {
         if (!isSettingsOpen) return;
 
@@ -560,103 +717,14 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
 
     useEffect(() => {
         if (!map || !isLoaded) return;
+        // Previously managed 'posts-layer' here.
+        // Now posts are rendered via MapOverlays (Deck.gl)
+    }, [map, isLoaded, mode, posts]); // Leaving minimal deps or removing entirely
 
-        if (!map.getSource('posts')) {
-            map.addSource('posts', {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: [],
-                },
-            });
-        }
-
-        if (!map.getLayer('posts-layer')) {
-            map.addLayer({
-                id: 'posts-layer',
-                type: 'circle',
-                source: 'posts',
-                paint: {
-                    'circle-radius': [
-                        'case',
-                        ['boolean', ['feature-state', 'hover'], false],
-                        11,
-                        6,
-                    ],
-                    'circle-color': '#f59e0b',
-                    'circle-stroke-width': [
-                        'case',
-                        ['boolean', ['feature-state', 'hover'], false],
-                        3,
-                        2,
-                    ],
-                    'circle-stroke-color': '#111827',
-                    'circle-radius-transition': { duration: 140, delay: 0 },
-                    'circle-stroke-width-transition': { duration: 140, delay: 0 },
-                },
-            });
-        }
-    }, [map, isLoaded]);
 
     useEffect(() => {
         if (!map || !isLoaded) return;
-
-        const source = map.getSource('posts') as maplibregl.GeoJSONSource | undefined;
-        if (source) {
-            source.setData({
-                type: 'FeatureCollection',
-                features: MOCK_POSTS.map((post) => ({
-                    type: 'Feature',
-                    id: post.id,
-                    geometry: {
-                        type: 'Point',
-                        coordinates: [post.location.lng, post.location.lat],
-                    },
-                    properties: {
-                        postId: post.id,
-                        caption: post.caption,
-                        photoUrl: post.photos?.[0]?.url ?? '',
-                        placeName: post.location.placeName ?? '',
-                        area: post.location.area ?? '',
-                        authorName: post.author?.name ?? '',
-                    },
-                })),
-            });
-        }
-
-        const visibility = mode === 'analyze' ? 'visible' : 'none';
-        if (map.getLayer('posts-layer')) {
-            map.setLayoutProperty('posts-layer', 'visibility', visibility);
-        }
-    }, [map, isLoaded, mode]);
-
-    useEffect(() => {
-        if (!map || !isLoaded) return;
-        if (!map.getLayer('posts-layer')) return;
-
-        const clearCloseTimer = () => {
-            if (postsPopupCloseTimerRef.current != null) {
-                window.clearTimeout(postsPopupCloseTimerRef.current);
-                postsPopupCloseTimerRef.current = null;
-            }
-        };
-
-        const setHover = (id: string | number | null, nextState: boolean) => {
-            if (!map.getSource('posts')) return;
-
-            if (hoveredPostIdRef.current != null && hoveredPostIdRef.current !== id) {
-                map.setFeatureState(
-                    { source: 'posts', id: hoveredPostIdRef.current },
-                    { hover: false }
-                );
-                hoveredPostIdRef.current = null;
-            }
-
-            if (id == null) return;
-
-            map.setFeatureState({ source: 'posts', id }, { hover: nextState });
-            hoveredPostIdRef.current = nextState ? id : null;
-        };
+        // previously checked posts-layer
 
         const setPostPopupExpanded = (id: string | number, expanded: boolean) => {
             const popup = postPopupsRef.current.get(String(id));
@@ -665,7 +733,7 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             const prev = postPopupExpandedRef.current.get(String(id));
             if (prev === expanded) return;
 
-            const post = MOCK_POSTS.find((item) => item.id === String(id));
+            const post = posts.find((item) => item.id === String(id));
             if (!post) return;
 
             popup.setHTML(buildPostPopupHtml(post, expanded));
@@ -674,23 +742,9 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
 
         const shouldShowImage = () => (map.getZoom?.() ?? 0) >= POSTS_IMAGE_ZOOM_THRESHOLD;
 
-        const collapseActivePopup = () => {
-            const id = hoveredPostIdRef.current;
-            if (id == null) return;
-            setPostPopupExpanded(id, shouldShowImage());
-            setHover(id, false);
-        };
-
-        const scheduleClose = () => {
-            clearCloseTimer();
-            postsPopupCloseTimerRef.current = window.setTimeout(() => {
-                collapseActivePopup();
-            }, 180);
-        };
-
         if (mode === 'analyze') {
             isZoomExpandedRef.current = shouldShowImage();
-            for (const post of MOCK_POSTS) {
+            for (const post of posts) {
                 let popup = postPopupsRef.current.get(post.id);
                 if (!popup) {
                     const expanded = shouldShowImage();
@@ -710,11 +764,8 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
                     postPopupExpandedRef.current.set(post.id, expanded);
 
                     const el = popup.getElement();
-                    el.addEventListener('mouseenter', () => {
-                        clearCloseTimer();
-                        setHover(post.id, true);
-                    });
-                    el.addEventListener('mouseleave', scheduleClose);
+                    el.addEventListener('mouseenter', () => handlePostHover(post.id));
+                    el.addEventListener('mouseleave', () => handlePostHover(null));
                     el.addEventListener(
                         'wheel',
                         (event) => {
@@ -733,7 +784,7 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             }
         } else {
             if (hoveredPostIdRef.current != null) {
-                setHover(hoveredPostIdRef.current, false);
+                handlePostHover(null);
             }
             for (const popup of postPopupsRef.current.values()) {
                 popup.remove();
@@ -741,33 +792,6 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             postPopupExpandedRef.current.clear();
             hoveredPostIdRef.current = null;
         }
-
-        const handleEnter = (e: maplibregl.MapLayerMouseEvent) => {
-            if (mode !== 'analyze') return;
-            clearCloseTimer();
-
-            const feature = e.features?.[0];
-            if (!feature) return;
-
-            const featureId = feature.id as string | number | undefined;
-            if (featureId != null) {
-                setHover(featureId, true);
-            }
-        };
-
-        const handleCursorEnter = () => {
-            if (mode !== 'analyze') return;
-            map.getCanvas().style.cursor = 'pointer';
-        };
-
-        const handleLeave = () => {
-            map.getCanvas().style.cursor = '';
-            scheduleClose();
-        };
-
-        map.on('mouseenter', 'posts-layer', handleEnter);
-        map.on('mouseenter', 'posts-layer', handleCursorEnter);
-        map.on('mouseleave', 'posts-layer', handleLeave);
 
         const handleZoom = () => {
             const expanded = shouldShowImage();
@@ -784,19 +808,19 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
         map.on('zoom', handleZoom);
 
         return () => {
-            map.off('mouseenter', 'posts-layer', handleEnter);
-            map.off('mouseenter', 'posts-layer', handleCursorEnter);
-            map.off('mouseleave', 'posts-layer', handleLeave);
             map.off('zoom', handleZoom);
 
-            clearCloseTimer();
+            if (postsPopupCloseTimerRef.current != null) {
+                window.clearTimeout(postsPopupCloseTimerRef.current);
+                postsPopupCloseTimerRef.current = null;
+            }
             for (const popup of postPopupsRef.current.values()) {
                 popup.remove();
             }
             postPopupsRef.current.clear();
             postPopupExpandedRef.current.clear();
         };
-    }, [map, isLoaded, mode]);
+    }, [map, isLoaded, mode, posts, handlePostHover]);
 
     useEffect(() => {
         if (scanMode === '360') {
@@ -839,6 +863,54 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [isViirsPanelOpen]);
+
+    // 投稿モーダル外クリックで閉じる
+    useEffect(() => {
+        if (!isPostModalOpen) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (postModalRef.current?.contains(target)) return;
+            if (postButtonRef.current?.contains(target)) return;
+            setIsPostModalOpen(false);
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsPostModalOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isPostModalOpen]);
+
+    // ピン選択モードでの地図クリックハンドラ
+    useEffect(() => {
+        if (!map || !isPinSelecting) return;
+
+        const handleMapClick = (e: maplibregl.MapMouseEvent) => {
+            const { lng, lat } = e.lngLat;
+            setPostPinLocation({ lat, lng });
+            setIsPinSelecting(false);
+            setIsPostModalOpen(true);
+        };
+
+        map.on('click', handleMapClick);
+
+        // カーソルをcrosshairに変更
+        map.getCanvas().style.cursor = 'crosshair';
+
+        return () => {
+            map.off('click', handleMapClick);
+            map.getCanvas().style.cursor = '';
+        };
+    }, [map, isPinSelecting]);
 
     useEffect(() => {
         if (mode !== 'explore') return;
@@ -1303,6 +1375,10 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
                 preferPreview={scanStep === 'adjusting_angle'}
                 showTargetRing={scanStep === 'adjusting_angle'}
                 viirsPoints={viirsPoints}
+                posts={posts}
+                hoveredPostId={hoveredPostId}
+                onPostHover={handlePostHover}
+                visiblePosts={mode === 'analyze'}
                 targetRingState={{
                     previewDeltaTheta,
                     setPreviewDeltaTheta,
@@ -1345,18 +1421,17 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
                                 <button
                                     key={preset.value}
                                     type="button"
-                                            onClick={() => {
-                                                fanDeltaThetaRef.current = preset.value;
-                                                setFanConfig((prev) => ({
-                                                    ...prev,
-                                                    deltaTheta: preset.value,
-                                                }));
-                                            }}
-                                    className={`rounded-full px-2 py-1 transition-colors ${
-                                        fanConfig.deltaTheta === preset.value
-                                            ? 'bg-yellow-400 text-black'
-                                            : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
-                                    }`}
+                                    onClick={() => {
+                                        fanDeltaThetaRef.current = preset.value;
+                                        setFanConfig((prev) => ({
+                                            ...prev,
+                                            deltaTheta: preset.value,
+                                        }));
+                                    }}
+                                    className={`rounded-full px-2 py-1 transition-colors ${fanConfig.deltaTheta === preset.value
+                                        ? 'bg-yellow-400 text-black'
+                                        : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                                        }`}
                                 >
                                     {preset.label}
                                 </button>
@@ -1369,6 +1444,171 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
                 )}
 
                 <div className="relative flex flex-col items-end gap-2">
+                    {/* 投稿ボタン */}
+                    <button
+                        ref={postButtonRef}
+                        type="button"
+                        onClick={() => setIsPostModalOpen((prev) => !prev)}
+                        className="group bg-black/60 backdrop-blur-md border border-yellow-400/60 text-white rounded-full shadow-lg h-11 w-11 hover:bg-yellow-400/20 hover:border-yellow-300 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                        aria-label="投稿する"
+                        aria-pressed={isPostModalOpen}
+                        disabled={!isSupabaseConfigured}
+                        title={isSupabaseConfigured ? '投稿する' : 'Supabase未設定'}
+                    >
+                        <span className="text-lg">📸</span>
+                    </button>
+                    {isPostModalOpen && (
+                        <div
+                            ref={postModalRef}
+                                    className="absolute right-0 bottom-14 w-72 rounded-xl border border-white/10 bg-black/80 p-4 shadow-lg backdrop-blur-md"
+                                >
+                                    <div className="text-sm text-white/90 font-medium mb-3">夜景を投稿</div>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1">
+                                                メッセージ <span className="text-red-400">*</span>
+                                            </label>
+                                            <textarea
+                                                value={postMessage}
+                                                onChange={(e) => setPostMessage(e.target.value)}
+                                                placeholder="夜景の感想を書いてください"
+                                                maxLength={280}
+                                                rows={3}
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none resize-none"
+                                            />
+                                            <div className="text-right text-[10px] text-white/40 mt-1">
+                                                {postMessage.length}/280
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1">
+                                                写真をアップロード または URL（任意）
+                                            </label>
+                                            <div className="space-y-2">
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    id="photo-upload"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0];
+                                                        if (file) setPostPhotoFile(file);
+                                                    }}
+                                                />
+                                                <label
+                                                    htmlFor="photo-upload"
+                                                    className="flex items-center justify-center w-full rounded-lg border border-dashed border-white/20 bg-white/5 px-3 py-4 text-xs text-white/60 hover:bg-white/10 hover:border-yellow-400/50 cursor-pointer transition-all"
+                                                >
+                                                    {postPhotoFile ? (
+                                                        <span className="text-yellow-400 flex items-center gap-2">
+                                                            <span>🖼️</span>
+                                                            <span className="truncate max-w-[200px]">{postPhotoFile.name}</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    setPostPhotoFile(null);
+                                                                }}
+                                                                className="text-white/40 hover:text-white"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </span>
+                                                    ) : (
+                                                        <span>画像を選択してください</span>
+                                                    )}
+                                                </label>
+
+                                                <input
+                                                    type="url"
+                                                    value={postPhotoUrl}
+                                                    onChange={(e) => setPostPhotoUrl(e.target.value)}
+                                                    placeholder="または画像のURLを入力"
+                                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-2">
+                                                📍 投稿場所
+                                            </label>
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPostLocationMode('center')}
+                                                        className={`flex-1 rounded-lg border py-2 text-xs transition-all ${
+                                                            postLocationMode === 'center'
+                                                                ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
+                                                                : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+                                                        }`}
+                                                    >
+                                                        🗺️ 地図中心
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPostLocationMode('current')}
+                                                        disabled={!currentLocation}
+                                                        className={`flex-1 rounded-lg border py-2 text-xs transition-all ${
+                                                            postLocationMode === 'current'
+                                                                ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
+                                                                : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed'
+                                                        }`}
+                                                    >
+                                                        📍 現在位置
+                                                    </button>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setPostLocationMode('pin');
+                                                        setIsPinSelecting(true);
+                                                        setIsPostModalOpen(false);
+                                                    }}
+                                                    className={`w-full rounded-lg border py-2 text-xs transition-all ${
+                                                        postLocationMode === 'pin' && postPinLocation
+                                                            ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
+                                                            : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+                                                    }`}
+                                                >
+                                                    {postLocationMode === 'pin' && postPinLocation
+                                                        ? `📌 ピン設定済み (${postPinLocation.lat.toFixed(4)}, ${postPinLocation.lng.toFixed(4)})`
+                                                        : '📌 地図をタップしてピンを刺す'}
+                                                </button>
+                                            </div>
+                                            {!currentLocation && postLocationMode !== 'current' && (
+                                                <div className="text-[10px] text-white/30 mt-1">
+                                                    現在位置は位置情報を許可すると使用できます
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2 pt-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsPostModalOpen(false);
+                                                    setPostMessage('');
+                                                    setPostPhotoUrl('');
+                                                    setPostPhotoFile(null);
+                                                    setPostLocationMode('center');
+                                                    setPostPinLocation(null);
+                                                }}
+                                                className="flex-1 rounded-lg border border-white/10 bg-white/5 py-2 text-sm text-white/70 hover:bg-white/10"
+                                            >
+                                                キャンセル
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleSubmitPost}
+                                                disabled={!postMessage.trim() || isPosting}
+                                                className="flex-1 rounded-lg bg-yellow-400 py-2 text-sm font-medium text-black hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {isPosting ? '投稿中...' : '投稿する'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                     <button
                         ref={viirsButtonRef}
                         type="button"
@@ -1415,6 +1655,19 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
                                     disabled={!viirsEnabled}
                                 />
                             </div>
+
+                            <div className="flex items-center justify-between text-sm text-white/80 mt-3 pt-3 border-t border-white/10">
+                                <span>航空写真</span>
+                                <label className="flex items-center gap-2 text-xs text-white/60">
+                                    <span>{aerialEnabled ? 'ON' : 'OFF'}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={aerialEnabled}
+                                        onChange={(event) => setAerialEnabled(event.target.checked)}
+                                        className="h-4 w-4 accent-yellow-400"
+                                    />
+                                </label>
+                            </div>
                         </div>
                     )}
                     <CurrentLocationButton
@@ -1431,6 +1684,25 @@ function buildPostPopupHtml(post: Post, expanded: boolean) {
             {locateError && (
                 <div className="absolute bottom-24 right-6 md:right-8 bg-red-900/80 text-white text-xs px-2 py-1 rounded backdrop-blur border border-red-500/30 z-20">
                     {locateError}
+                </div>
+            )}
+
+            {/* ピン選択モード時のバナー */}
+            {isPinSelecting && (
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50">
+                    <div className="bg-yellow-400 text-black px-4 py-2 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
+                        <span>📌 地図をタップして投稿場所を選択</span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsPinSelecting(false);
+                                setIsPostModalOpen(true);
+                            }}
+                            className="bg-black/20 hover:bg-black/30 px-2 py-1 rounded text-xs"
+                        >
+                            キャンセル
+                        </button>
+                    </div>
                 </div>
             )}
 

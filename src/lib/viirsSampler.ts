@@ -20,6 +20,12 @@ const VIIRS_TILE_BOUNDS = {
 // タイルごとのポイントキャッシュ
 const tileCache = new Map<string, ViirsPoint[]>();
 
+// キャッシュをクリアする（パラメータ変更時に呼び出す）
+export function clearViirsCache(): void {
+    tileCache.clear();
+    console.log('[VIIRS] cache cleared');
+}
+
 function decodeVIIRS01(r: number, g: number, b: number, a: number) {
     if (a === 0) return 0;
     const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -72,6 +78,7 @@ async function sampleViirsTile(
         threshold: number;
         emit: number;
         gamma: number;
+        logK: number;
         maxPointsPerTile: number;
         heightScale: number;
     }
@@ -104,7 +111,7 @@ async function sampleViirsTile(
     const img = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
 
     const points: ViirsPoint[] = [];
-    const { stride, threshold, emit, gamma, maxPointsPerTile, heightScale } = opts;
+    const { stride, threshold, emit, gamma, logK, maxPointsPerTile, heightScale } = opts;
     const width = TILE_SIZE;
     const height = TILE_SIZE;
 
@@ -128,8 +135,19 @@ async function sampleViirsTile(
             if (jittered <= 0) continue;
             if (jittered < threshold) continue;
 
+            // 閾値以上の部分を0-1に正規化
             const norm = Math.max(0, (jittered - threshold) / (1 - threshold));
-            const mean = emit * Math.pow(norm, gamma);
+            
+            // log圧縮: v' = log(1 + k*v) / log(1 + k)
+            // これにより暗い部分が持ち上がり、明るい部分の飽和が抑えられる
+            const logCompressed = logK > 0 
+                ? Math.log(1 + logK * norm) / Math.log(1 + logK)
+                : norm;
+            
+            // gamma補正でメリハリ調整
+            const adjusted = Math.pow(logCompressed, gamma);
+            
+            const mean = emit * adjusted;
             const nParticles = Math.floor(mean + pixelSeed);
             if (nParticles <= 0) continue;
 
@@ -144,8 +162,8 @@ async function sampleViirsTile(
                 const { lng, lat } = tileXYToLngLat(x, y, z, subPx, subPy, width, height);
                 if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
                 points.push({
-                    position: [lng, lat, norm * heightScale],
-                    intensity: norm,
+                    position: [lng, lat, adjusted * heightScale],
+                    intensity: adjusted,
                 });
             }
         }
@@ -183,6 +201,7 @@ async function getOrLoadTile(
         threshold: number;
         emit: number;
         gamma: number;
+        logK: number;
         maxPointsPerTile: number;
         heightScale: number;
     }
@@ -211,17 +230,19 @@ export async function buildViirsPoints(
         threshold?: number;
         emit?: number;
         gamma?: number;
+        logK?: number;
         maxPoints?: number;
         maxPointsPerTile?: number;
         heightScale?: number;
     }
 ): Promise<ViirsPoint[]> {
     const stride = opts.stride ?? 1;
-    const threshold = opts.threshold ?? 0.02;
-    const emit = opts.emit ?? 18;
-    const gamma = opts.gamma ?? 0.55;
-    const maxPoints = opts.maxPoints ?? 120000;
-    const maxPointsPerTile = opts.maxPointsPerTile ?? 8000;
+    const threshold = opts.threshold ?? 1.0;
+    const emit = opts.emit ?? 6;
+    const gamma = opts.gamma ?? 0.8;
+    const logK = opts.logK ?? 10;
+    const maxPoints = opts.maxPoints ?? 60000;
+    const maxPointsPerTile = opts.maxPointsPerTile ?? 4000;
     const heightScale = opts.heightScale ?? 80;
 
     const sw = bounds.getSouthWest();
@@ -261,7 +282,7 @@ export async function buildViirsPoints(
 
     // 並列でタイルを処理（キャッシュがあればスキップ）
     const CONCURRENCY = 8;
-    const tileOpts = { stride, threshold, emit, gamma, maxPointsPerTile, heightScale };
+    const tileOpts = { stride, threshold, emit, gamma, logK, maxPointsPerTile, heightScale };
 
     for (let i = 0; i < neededTiles.length; i += CONCURRENCY) {
         const batch = neededTiles.slice(i, i + CONCURRENCY);
@@ -306,9 +327,4 @@ export async function buildViirsPoints(
     }
 
     return allPoints;
-}
-
-// キャッシュをクリアする（stride変更時などに呼ぶ）
-export function clearViirsCache(): void {
-    tileCache.clear();
 }

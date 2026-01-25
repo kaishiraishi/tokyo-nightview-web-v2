@@ -32,6 +32,10 @@ const TERRAIN_EXAGGERATION = 1.8;
 const VIIRS_SOURCE_ID = 'viirs-nightlight';
 const VIIRS_LAYER_ID = 'viirs-nightlight-layer';
 
+const AERIAL_SOURCE_ID = 'aerial-photo';
+const AERIAL_LAYER_ID = 'aerial-photo-layer';
+const AERIAL_TILE_URL = 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg';
+
 function addVIIRSNightLight(map: maplibregl.Map) {
     if (!map.getSource(VIIRS_SOURCE_ID)) {
         map.addSource(VIIRS_SOURCE_ID, {
@@ -57,6 +61,39 @@ function addVIIRSNightLight(map: maplibregl.Map) {
             },
         });
         console.log('[VIIRS] Layer added as hidden');
+    }
+}
+
+function addAerialPhoto(map: maplibregl.Map) {
+    if (!map.getSource(AERIAL_SOURCE_ID)) {
+        map.addSource(AERIAL_SOURCE_ID, {
+            type: 'raster',
+            tiles: [AERIAL_TILE_URL],
+            tileSize: 256,
+            attribution: '国土地理院',
+        });
+        console.log('[Aerial] Source added');
+    }
+
+    if (!map.getLayer(AERIAL_LAYER_ID)) {
+        // ラベルなどの最下層にあるシンボルレイヤーを取得し、その手前に挿入する
+        const firstSymbolId = map.getStyle().layers?.find((l) => l.type === 'symbol')?.id;
+
+        map.addLayer(
+            {
+                id: AERIAL_LAYER_ID,
+                type: 'raster',
+                source: AERIAL_SOURCE_ID,
+                layout: {
+                    visibility: 'none',
+                },
+                paint: {
+                    'raster-opacity': 1,
+                },
+            },
+            firstSymbolId
+        );
+        console.log('[Aerial] Layer added (hidden by default)');
     }
 }
 
@@ -146,14 +183,88 @@ function addPlateauExtrusion(map: maplibregl.Map) {
             firstSymbolId
         );
         console.log('[PLATEAU] Layer added (minzoom: 13)');
+    }
+}
 
-        // Debug: check features
-        map.once('idle', () => {
-            const feats = map.querySourceFeatures(PLATEAU_SOURCE_ID, { sourceLayer: SOURCE_LAYER_ID });
-            console.log('[PLATEAU] Features loaded:', feats.length);
-            if (feats.length > 0) {
-                console.log('[PLATEAU] Sample:', feats[0].properties);
+// ============================================
+// Label Localization (Force Japanese)
+// ============================================
+function forceJapaneseLabels(map: maplibregl.Map) {
+    const style = map.getStyle();
+    if (!style || !style.layers) return;
+
+    for (const layer of style.layers) {
+        if (layer.type === 'symbol') {
+            const layout = layer.layout || {};
+            // If it has a text-field, overwrite it to prioritize Japanese
+            if (layout['text-field']) {
+                map.setLayoutProperty(layer.id, 'text-field', [
+                    'coalesce',
+                    ['get', 'name:ja'],
+                    ['get', 'name'],
+                    ['get', 'name:en']
+                ]);
             }
+        }
+    }
+    console.log('[Map] Labels forced to Japanese');
+}
+
+// ============================================
+// Mask Non-Tokyo Areas
+// ============================================
+function addTokyoMask(map: maplibregl.Map) {
+    const MASK_SOURCE_ID = 'tokyo-mask-source';
+    const MASK_LAYER_ID = 'tokyo-mask-layer';
+
+    const WORLD_BOUNDS = [
+        [-180, -90],
+        [180, -90],
+        [180, 90],
+        [-180, 90],
+        [-180, -90],
+    ];
+
+    // Counter-clockwise for global outer ring (GeoJSON recommendation)
+    // Actually MapLibre usually takes external ring as CCW? Or CW?
+    // Let's stick to standard: Exterior ring CCW, Interior ring CW. The standard is confusing.
+    // Spec says: Exterior ring is CCW.
+
+    // Tokyo Rect (Hole)
+    // [138.9, 35.2] to [140.2, 35.9]
+    // Clockwise for hole
+    const TOKYO_HOLE = [
+        [138.9, 35.2], // SW
+        [138.9, 35.9], // NW
+        [140.2, 35.9], // NE
+        [140.2, 35.2], // SE
+        [138.9, 35.2], // SW
+    ];
+
+    if (!map.getSource(MASK_SOURCE_ID)) {
+        map.addSource(MASK_SOURCE_ID, {
+            type: 'geojson',
+            data: {
+                type: 'Feature',
+                geometry: {
+                    type: 'Polygon',
+                    coordinates: [WORLD_BOUNDS, TOKYO_HOLE],
+                },
+                properties: {},
+            },
+        });
+    }
+
+    if (!map.getLayer(MASK_LAYER_ID)) {
+        map.addLayer({
+            id: MASK_LAYER_ID,
+            type: 'fill',
+            source: MASK_SOURCE_ID,
+            layout: {},
+            paint: {
+                'fill-color': '#000000',
+                'fill-opacity': 0.4,
+            },
         });
     }
 }
@@ -248,6 +359,14 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
             addVIIRSNightLight(map);
+            addAerialPhoto(map);
+
+            // Mask non-Tokyo areas
+            addTokyoMask(map);
+
+            // Apply label fix
+            forceJapaneseLabels(map);
+
             setIsLoaded(true);
         });
 
@@ -255,7 +374,14 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             console.log('[Map] Style reloaded');
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addVIIRSNightLight(map);
+            addAerialPhoto(map);
             addPlateauExtrusion(map);
+
+            // Mask non-Tokyo areas
+            addTokyoMask(map);
+
+            // Apply label fix
+            forceJapaneseLabels(map);
         });
 
         mapRef.current = map;

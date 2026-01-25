@@ -67,6 +67,9 @@ export function TopRightHud({
         }
     };
 
+
+
+
     const handleSelectResult = (result: GeocodingResult) => {
         onSearchLocation(result.lat, result.lng);
         setShowResults(false);
@@ -147,11 +150,10 @@ export function TopRightHud({
                         type="button"
                         aria-pressed={mode === 'explore'}
                         onClick={() => onModeChange('explore')}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
-                            mode === 'explore'
-                                ? 'bg-white text-black'
-                                : 'text-white/70 hover:text-white'
-                        }`}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${mode === 'explore'
+                            ? 'bg-white text-black'
+                            : 'text-white/70 hover:text-white'
+                            }`}
                     >
                         <Search className="h-4 w-4" aria-hidden="true" />
                         さがす
@@ -161,11 +163,10 @@ export function TopRightHud({
                         type="button"
                         aria-pressed={mode === 'analyze'}
                         onClick={() => onModeChange('analyze')}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
-                            mode === 'analyze'
-                                ? 'bg-white text-black'
-                                : 'text-white/70 hover:text-white'
-                        }`}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${mode === 'analyze'
+                            ? 'bg-white text-black'
+                            : 'text-white/70 hover:text-white'
+                            }`}
                     >
                         <Sparkles className="h-4 w-4" aria-hidden="true" />
                         みつける
@@ -248,11 +249,10 @@ export function TopRightHud({
                                         type="button"
                                         onClick={() => onScanModeChange(tab.key as ScanMode)}
                                         aria-pressed={scanMode === tab.key}
-                                        className={`flex-1 rounded-full px-3 py-1 font-semibold tracking-wide transition-colors ${
-                                            scanMode === tab.key
-                                                ? 'bg-yellow-400 text-black'
-                                                : 'text-white/70 hover:text-white'
-                                        }`}
+                                        className={`flex-1 rounded-full px-3 py-1 font-semibold tracking-wide transition-colors ${scanMode === tab.key
+                                            ? 'bg-yellow-400 text-black'
+                                            : 'text-white/70 hover:text-white'
+                                            }`}
                                     >
                                         {tab.label}
                                     </button>
@@ -262,49 +262,49 @@ export function TopRightHud({
                             <div className="mt-3 space-y-2 text-xs">
                                 {(scanMode === 'fan'
                                     ? [
-                                    {
-                                        key: 'selecting_source',
-                                        label: '観測点を決定',
-                                        help: 'ダブルクリックで観測点',
-                                    },
-                                    {
-                                        key: 'selecting_target',
-                                        label: '目標点を決定',
-                                        help: 'シングルクリックで目標点',
-                                    },
-                                    {
-                                        key: 'adjusting_angle',
-                                        label: '角度を調整',
-                                        help: 'マウス移動で角度調整 → クリックで確定',
-                                    },
-                                ]
+                                        {
+                                            key: 'selecting_source',
+                                            label: '観測点を決定',
+                                            help: 'ダブルクリックで観測点',
+                                        },
+                                        {
+                                            key: 'selecting_target',
+                                            label: '目標点を決定',
+                                            help: 'シングルクリックで目標点',
+                                        },
+                                        {
+                                            key: 'adjusting_angle',
+                                            label: '角度を調整',
+                                            help: 'マウス移動で角度調整 → クリックで確定',
+                                        },
+                                    ]
                                     : [
-                                    {
-                                        key: 'selecting_source',
-                                        label: '観測点を決定',
-                                        help: 'ダブルクリックで観測点',
-                                    },
-                                    {
-                                        key: 'adjusting_range',
-                                        label: '半径を調整',
-                                        help: 'マウス移動で半径調整 → クリックで確定',
-                                    },
-                                    {
-                                        key: 'scanning',
-                                        label: '360°スキャン',
-                                        help: 'スキャンを実行中',
-                                    },
-                                    {
-                                        key: 'complete',
-                                        label: '完了',
-                                        help: '結果を表示中',
-                                    },
-                                ]).map((step, index) => {
-                                    const isActive = scanStatus.scanStep === step.key;
-                                    const isDone =
-                                        scanStatus.scanStep !== 'idle' &&
-                                        !isActive &&
-                                        index <
+                                        {
+                                            key: 'selecting_source',
+                                            label: '観測点を決定',
+                                            help: 'ダブルクリックで観測点',
+                                        },
+                                        {
+                                            key: 'adjusting_range',
+                                            label: '半径を調整',
+                                            help: 'マウス移動で半径調整 → クリックで確定',
+                                        },
+                                        {
+                                            key: 'scanning',
+                                            label: '360°スキャン',
+                                            help: 'スキャンを実行中',
+                                        },
+                                        {
+                                            key: 'complete',
+                                            label: '完了',
+                                            help: '結果を表示中',
+                                        },
+                                    ]).map((step, index) => {
+                                        const isActive = scanStatus.scanStep === step.key;
+                                        const isDone =
+                                            scanStatus.scanStep !== 'idle' &&
+                                            !isActive &&
+                                            index <
                                             [
                                                 'selecting_source',
                                                 ...(scanMode === 'fan'
@@ -312,44 +312,42 @@ export function TopRightHud({
                                                     : ['adjusting_range', 'scanning', 'complete']),
                                             ].indexOf(scanStatus.scanStep);
 
-                                    return (
-                                        <div
-                                            key={step.key}
-                                            className={`flex items-start gap-2 rounded-lg border px-2 py-2 ${
-                                                isActive
+                                        return (
+                                            <div
+                                                key={step.key}
+                                                className={`flex items-start gap-2 rounded-lg border px-2 py-2 ${isActive
                                                     ? 'border-yellow-400/60 bg-yellow-400/10'
                                                     : isDone
                                                         ? 'border-white/10 bg-white/5'
                                                         : 'border-white/10 bg-black/30'
-                                            }`}
-                                        >
-                                            <div
-                                                className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
-                                                    isActive ? 'bg-yellow-400' : isDone ? 'bg-emerald-400/70' : 'bg-white/20'
-                                                }`}
-                                            />
-                                            <div className="flex-1">
-                                                <div className="text-white/90">{step.label}</div>
-                                                <div className="text-[11px] text-white/50">{step.help}</div>
-                                                {step.key === 'adjusting_angle' && isActive && (
-                                                    <div className="mt-1 text-[11px] text-white/70">
-                                                        Angle: {Math.round(scanStatus.previewDeltaTheta ?? scanStatus.deltaTheta)}°
-                                                    </div>
-                                                )}
-                                                {scanStatus.error && isActive && (
-                                                    <div className="mt-1 text-[11px] text-red-400">
-                                                        Error: {scanStatus.error}
-                                                    </div>
-                                                )}
-                                                {scanStatus.loading && isActive && (
-                                                    <div className="mt-1 text-[11px] text-blue-400 animate-pulse">
-                                                        Scanning...
-                                                    </div>
-                                                )}
+                                                    }`}
+                                            >
+                                                <div
+                                                    className={`mt-0.5 h-2.5 w-2.5 rounded-full ${isActive ? 'bg-yellow-400' : isDone ? 'bg-emerald-400/70' : 'bg-white/20'
+                                                        }`}
+                                                />
+                                                <div className="flex-1">
+                                                    <div className="text-white/90">{step.label}</div>
+                                                    <div className="text-[11px] text-white/50">{step.help}</div>
+                                                    {step.key === 'adjusting_angle' && isActive && (
+                                                        <div className="mt-1 text-[11px] text-white/70">
+                                                            Angle: {Math.round(scanStatus.previewDeltaTheta ?? scanStatus.deltaTheta)}°
+                                                        </div>
+                                                    )}
+                                                    {scanStatus.error && isActive && (
+                                                        <div className="mt-1 text-[11px] text-red-400">
+                                                            Error: {scanStatus.error}
+                                                        </div>
+                                                    )}
+                                                    {scanStatus.loading && isActive && (
+                                                        <div className="mt-1 text-[11px] text-blue-400 animate-pulse">
+                                                            Scanning...
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
                             </div>
                         </div>
                     </>
