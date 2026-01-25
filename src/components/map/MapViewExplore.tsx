@@ -109,6 +109,17 @@ export function MapViewExplore({
     const [northResetTrigger, setNorthResetTrigger] = useState<number>(0);
     const [isLocating, setIsLocating] = useState(false);
     const [locateError, setLocateError] = useState<string | null>(null);
+
+    // Auto-clear locate error after 1 second
+    useEffect(() => {
+        if (locateError) {
+            const timer = setTimeout(() => {
+                setLocateError(null);
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [locateError]);
+
     const hasAutoSetSourceRef = useRef(false);
     const hasInitialFlyRef = useRef(false);
 
@@ -1409,8 +1420,6 @@ export function MapViewExplore({
                 console.error("Geolocation failed", err);
                 setLocateError(err.message);
                 setIsLocating(false);
-                // Ideally show toast here, for now relying on UI error state if any, or console
-                alert(`位置情報の取得に失敗しました: ${err.message}`);
             },
             { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
@@ -1439,7 +1448,11 @@ export function MapViewExplore({
 
             {/* Location Selection Confirmation Button */}
             {(scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
-                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[4000] flex flex-col items-center gap-2 pointer-events-none">
+                <div className={`absolute left-1/2 -translate-x-1/2 z-[7000] flex flex-col items-center gap-2 pointer-events-none transition-all duration-300 ${
+                    isMobile 
+                        ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0' : 'bottom-20') 
+                        : 'bottom-10'
+                }`}>
                     <button
                         onClick={() => {
                             if (!map) return;
@@ -1498,9 +1511,17 @@ export function MapViewExplore({
             {/* Error Notifications - Top Center */}
             <div className="fixed top-36 left-1/2 -translate-x-1/2 flex flex-col gap-2 z-[7000] w-[90%] max-w-sm pointer-events-none">
                 {locateError && (
-                    <div className="bg-red-500/95 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-4 pointer-events-auto border border-white/20">
-                        <span className="text-sm">📍</span>
-                        {locateError}
+                    <div className="bg-red-500/95 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-4 pointer-events-auto border border-white/20">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm">📍</span>
+                            <span>{locateError}</span>
+                        </div>
+                        <button 
+                            onClick={() => setLocateError(null)}
+                            className="ml-2 p-1 hover:bg-white/20 rounded-full transition-colors"
+                        >
+                            ✕
+                        </button>
                     </div>
                 )}
                 {error && (
@@ -1599,7 +1620,7 @@ export function MapViewExplore({
             {/* Bottom Right Controls */}
             <div className={`absolute right-6 flex items-end gap-4 md:right-8 z-[7000] pointer-events-auto transition-all duration-300 ${
                 isMobile 
-                    ? (isLayerMenuOpen ? 'bottom-[65vh]' : 'bottom-32') 
+                    ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0 pointer-events-none' : 'bottom-20') 
                     : 'bottom-6 md:bottom-8'
             }`}>
                 <div className="relative flex flex-col items-end gap-2">

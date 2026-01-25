@@ -87,7 +87,7 @@ export function TopBar({
                     {/* Search Results Dropdown */}
                     {showResults && searchResults.length > 0 && (
                         <div
-                            className="absolute left-0 right-0 top-14 overflow-hidden rounded-2xl border border-white/10 bg-black/90 shadow-2xl backdrop-blur-md"
+                            className="absolute left-0 right-0 top-14 overflow-hidden rounded-2xl border border-white/10 bg-black/90 shadow-2xl backdrop-blur-md z-[6000]"
                             onMouseLeave={onCloseResults}
                         >
                             <div className="max-h-[60vh] overflow-y-auto py-2">
