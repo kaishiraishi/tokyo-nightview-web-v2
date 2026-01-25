@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Camera, Layers } from 'lucide-react';
+import { Camera } from 'lucide-react';
 import { LayerMenu } from '../layout/LayerMenu';
 import { TopBar } from '../layout/TopBar';
 import { ScanControlPanel } from '../hud/ScanControlPanel';
@@ -261,10 +261,6 @@ export function MapViewExplore({
 
     // VIIRS controls
     const [viirsEnabled, setViirsEnabled] = useState(true);
-    const [viirsOpacity, setViirsOpacity] = useState<number>(0.2);
-    const [isViirsPanelOpen, setIsViirsPanelOpen] = useState(false);
-    const viirsPanelRef = useRef<HTMLDivElement | null>(null);
-    const viirsButtonRef = useRef<HTMLButtonElement | null>(null);
     const viirsUpdateTimerRef = useRef<number | null>(null);
     const viirsRequestIdRef = useRef(0);
 
@@ -917,31 +913,6 @@ export function MapViewExplore({
         }
     }, [scanMode, fanConfig.deltaTheta]);
 
-    useEffect(() => {
-        if (!isViirsPanelOpen) return;
-
-        const handlePointerDown = (event: MouseEvent) => {
-            const target = event.target as Node;
-            if (viirsPanelRef.current?.contains(target)) return;
-            if (viirsButtonRef.current?.contains(target)) return;
-            setIsViirsPanelOpen(false);
-        };
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setIsViirsPanelOpen(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
-
-        return () => {
-            document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [isViirsPanelOpen]);
-
     // 投稿モーダル外クリックで閉じる
     useEffect(() => {
         if (!isPostModalOpen) return;
@@ -1054,31 +1025,12 @@ export function MapViewExplore({
         if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
-        const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
+        const handleSourceClick = (_e: maplibregl.MapMouseEvent) => {
             if (Date.now() - lastStepChangeTimeRef.current < 200) return;
-            
-            let nextSource;
-            if (isMobile) {
-                const center = map.getCenter();
-                nextSource = { lng: center.lng, lat: center.lat };
-            } else {
-                nextSource = {
-                    lng: e.lngLat.lng,
-                    lat: e.lngLat.lat,
-                };
-            }
-            
-            setSourceLocation(nextSource);
-            if (scanMode === '360') {
-                setTargetLocation(null);
-                setPreviewRangeM(scanRangeM);
-                setFanRayResults([]);
-                setRayResult(null);
-                handleSetScanStep('adjusting_range');
-                return;
-            }
-            // 自動で目標点選択へ
-            handleSetScanStep('selecting_target');
+            // 地図クリックでの決定を無効化（「確定」ボタンを使用させる）
+            // 誤操作防止のため、デスクトップでもボタンまたはダブルクリック等への移行を検討
+            // ここでは一貫性のためにモバイル同様にクリックを無視する
+            return;
         };
 
         map.getCanvas().style.cursor = 'crosshair';
@@ -1147,49 +1099,17 @@ export function MapViewExplore({
 
         setPreviewDeltaTheta(null);
 
-        const handleTargetMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
-            if (e.originalEvent) {
-                // e.originalEvent.preventDefault();
-            }
-            if (!e.lngLat) return;
-            setTargetLocation({
-                lng: e.lngLat.lng,
-                lat: e.lngLat.lat,
-            });
-        };
-
-        const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
+        const handleTargetClick = (_e: maplibregl.MapMouseEvent) => {
             if (Date.now() - lastStepChangeTimeRef.current < 200) return;
-            
-            let nextTarget;
-            if (isMobile) {
-                const center = map.getCenter();
-                nextTarget = { lng: center.lng, lat: center.lat };
-            } else {
-                nextTarget = {
-                    lng: e.lngLat.lng,
-                    lat: e.lngLat.lat,
-                };
-            }
-            
-            setTargetLocation(nextTarget);
-            if (scanMode === '360') {
-                handleSetScanStep('scanning');
-                executeScan({ deltaTheta: 360 }, nextTarget);
-                return;
-            }
-            handleSetScanStep('adjusting_angle');
+            // 地図クリックでの決定を無効化（「確定」ボタンを使用させる）
+            return;
         };
 
         map.getCanvas().style.cursor = 'crosshair';
-        map.on('mousemove', handleTargetMove);
-        map.on('touchmove', handleTargetMove);
         map.on('click', handleTargetClick);
 
         return () => {
             map.getCanvas().style.cursor = '';
-            map.off('mousemove', handleTargetMove);
-            map.off('touchmove', handleTargetMove);
             map.off('click', handleTargetClick);
         };
     }, [map, isLoaded, scanStep, scanMode, mode, handleSetScanStep]);
@@ -1507,13 +1427,50 @@ export function MapViewExplore({
                 className="w-full h-full transition-opacity duration-300 touch-none" 
             />
 
-            {/* Center Crosshair for Mobile selection - Simple, Small & Thick */}
-            {isMobile && (scanStep === 'idle' || scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
+            {/* Center Crosshair for Location selection - Simple, Small & Thick */}
+            {((isMobile && scanStep === 'idle') || scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[3500]">
                     <div className="relative w-8 h-8 flex items-center justify-center">
                         <div className="absolute w-full h-[2px] bg-white/90 shadow-[0_0_4px_rgba(0,0,0,0.5)]" />
                         <div className="absolute h-full w-[2px] bg-white/90 shadow-[0_0_4px_rgba(0,0,0,0.5)]" />
                     </div>
+                </div>
+            )}
+
+            {/* Location Selection Confirmation Button */}
+            {(scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
+                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[4000] flex flex-col items-center gap-2 pointer-events-none">
+                    <button
+                        onClick={() => {
+                            if (!map) return;
+                            const center = map.getCenter();
+                            const pos = { lng: center.lng, lat: center.lat };
+                            if (scanStep === 'selecting_source') {
+                                setSourceLocation(pos);
+                                if (scanMode === '360') {
+                                    setTargetLocation(null);
+                                    setPreviewRangeM(scanRangeM);
+                                    setFanRayResults([]);
+                                    setRayResult(null);
+                                    handleSetScanStep('adjusting_range');
+                                } else {
+                                    handleSetScanStep('selecting_target');
+                                }
+                            } else {
+                                setTargetLocation(pos);
+                                if (scanMode === '360') {
+                                    handleSetScanStep('scanning');
+                                    executeScan({ deltaTheta: 360 }, pos);
+                                } else {
+                                    handleSetScanStep('adjusting_angle');
+                                }
+                            }
+                        }}
+                        className="pointer-events-auto bg-yellow-400 text-black px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-yellow-300 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
+                    >
+                        <span>📍</span>
+                        {scanStep === 'selecting_source' ? '観測地点を確定' : '目標地点を確定'}
+                    </button>
                 </div>
             )}
 
@@ -1538,6 +1495,27 @@ export function MapViewExplore({
                 onFanConfigChange={setFanConfig}
             />
 
+            {/* Error Notifications - Top Center */}
+            <div className="fixed top-36 left-1/2 -translate-x-1/2 flex flex-col gap-2 z-[7000] w-[90%] max-w-sm pointer-events-none">
+                {locateError && (
+                    <div className="bg-red-500/95 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-4 pointer-events-auto border border-white/20">
+                        <span className="text-sm">📍</span>
+                        {locateError}
+                    </div>
+                )}
+                {error && (
+                    <div className="bg-red-500/95 text-white px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex flex-col gap-1 border border-white/20 animate-in fade-in slide-in-from-top-4 pointer-events-auto">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm">⚠️</span>
+                            <span>分析エラー</span>
+                        </div>
+                        <div className="text-[10px] font-normal opacity-90 leading-tight">
+                            {error}
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* 2. Side Panel / Bottom Sheet (Contextual Details) */}
             <LayerMenu 
                 isOpen={isLayerMenuOpen} 
@@ -1547,6 +1525,10 @@ export function MapViewExplore({
                     <ScanControlPanel
                         scanMode={scanMode}
                         onScanModeChange={handleScanModeChange}
+                        viirsEnabled={viirsEnabled}
+                        setViirsEnabled={setViirsEnabled}
+                        aerialEnabled={aerialEnabled}
+                        setAerialEnabled={setAerialEnabled}
                         scanStatus={{
                             scanStep,
                             loading,
@@ -1564,6 +1546,10 @@ export function MapViewExplore({
                     <PostListPanel
                         posts={posts}
                         // isLoading={isPostsLoading} // TODO: Add loading state to postsApi
+                        viirsEnabled={viirsEnabled}
+                        setViirsEnabled={setViirsEnabled}
+                        aerialEnabled={aerialEnabled}
+                        setAerialEnabled={setAerialEnabled}
                         onPostClick={(post) => {
                            map?.flyTo({
                                center: [post.location.lng, post.location.lat],
@@ -1611,7 +1597,11 @@ export function MapViewExplore({
             />
 
             {/* Bottom Right Controls */}
-            <div className="absolute bottom-6 right-6 flex items-end gap-4 md:bottom-8 md:right-8 z-[5000] pointer-events-auto">
+            <div className={`absolute right-6 flex items-end gap-4 md:right-8 z-[7000] pointer-events-auto transition-all duration-300 ${
+                isMobile 
+                    ? (isLayerMenuOpen ? 'bottom-[65vh]' : 'bottom-32') 
+                    : 'bottom-6 md:bottom-8'
+            }`}>
                 <div className="relative flex flex-col items-end gap-2">
                     {/* 投稿ボタン */}
                     <button
@@ -1767,67 +1757,6 @@ export function MapViewExplore({
                                     </div>
                                 </div>
                             )}
-                    <button
-                        ref={viirsButtonRef}
-                        type="button"
-                        onClick={() => setIsViirsPanelOpen((prev) => !prev)}
-                        className="group bg-black/60 backdrop-blur-md border border-white/10 text-white rounded-full shadow-lg h-11 w-11 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all duration-200 flex items-center justify-center"
-                        aria-label="VIIRS設定"
-                        aria-pressed={isViirsPanelOpen}
-                    >
-                        <Layers className="w-5 h-5 text-white/90 group-hover:scale-110 transition-transform" />
-                    </button>
-                    {isViirsPanelOpen && (
-                        <div
-                            ref={viirsPanelRef}
-                            className="absolute right-0 bottom-14 w-56 rounded-xl border border-white/10 bg-black/70 p-3 shadow-lg backdrop-blur-md"
-                        >
-                            <div className="flex items-center justify-between text-sm text-white/80">
-                                <span>VIIRS</span>
-                                <label className="flex items-center gap-2 text-xs text-white/60">
-                                    <span>{viirsEnabled ? 'ON' : 'OFF'}</span>
-                                    <input
-                                        type="checkbox"
-                                        checked={viirsEnabled}
-                                        onChange={(event) => setViirsEnabled(event.target.checked)}
-                                        className="h-4 w-4 accent-yellow-400"
-                                    />
-                                </label>
-                            </div>
-                            <div className={`mt-3 ${viirsEnabled ? '' : 'opacity-50'}`}>
-                                <div className="flex items-center justify-between text-xs text-white/60">
-                                    <span>Opacity</span>
-                                    <span className="text-white/80">
-                                        {Math.round(viirsOpacity * 100)}%
-                                    </span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={0}
-                                    max={100}
-                                    value={Math.round(viirsOpacity * 100)}
-                                    onChange={(event) => {
-                                        setViirsOpacity(Number(event.target.value) / 100);
-                                    }}
-                                    className="mt-2 w-full accent-yellow-400"
-                                    disabled={!viirsEnabled}
-                                />
-                            </div>
-
-                            <div className="flex items-center justify-between text-sm text-white/80 mt-3 pt-3 border-t border-white/10">
-                                <span>航空写真</span>
-                                <label className="flex items-center gap-2 text-xs text-white/60">
-                                    <span>{aerialEnabled ? 'ON' : 'OFF'}</span>
-                                    <input
-                                        type="checkbox"
-                                        checked={aerialEnabled}
-                                        onChange={(event) => setAerialEnabled(event.target.checked)}
-                                        className="h-4 w-4 accent-yellow-400"
-                                    />
-                                </label>
-                            </div>
-                        </div>
-                    )}
                     <CurrentLocationButton
                         onClick={() => {
                             console.log('Location clicked');
@@ -1839,11 +1768,6 @@ export function MapViewExplore({
                     />
                 </div>
             </div>
-            {locateError && (
-                <div className="absolute bottom-24 right-6 md:right-8 bg-red-900/80 text-white text-xs px-2 py-1 rounded backdrop-blur border border-red-500/30 z-20">
-                    {locateError}
-                </div>
-            )}
 
             {/* ピン選択モード時のバナー */}
             {isPinSelecting && (

@@ -1,12 +1,26 @@
 import type { Post } from '../../lib/postsApi';
+import { LayerSettings } from '../layout/LayerSettings';
 
 type PostListPanelProps = {
     posts: Post[];
     isLoading?: boolean;
     onPostClick: (post: Post) => void;
+    // Layer settings props
+    viirsEnabled: boolean;
+    setViirsEnabled: (enabled: boolean) => void;
+    aerialEnabled: boolean;
+    setAerialEnabled: (enabled: boolean) => void;
 };
 
-export function PostListPanel({ posts, isLoading, onPostClick }: PostListPanelProps) {
+export function PostListPanel({ 
+    posts, 
+    isLoading, 
+    onPostClick,
+    viirsEnabled,
+    setViirsEnabled,
+    aerialEnabled,
+    setAerialEnabled
+}: PostListPanelProps) {
     if (isLoading) {
         return <div className="p-8 text-center text-white/50 text-sm">読み込み中...</div>;
     }
@@ -25,10 +39,18 @@ export function PostListPanel({ posts, isLoading, onPostClick }: PostListPanelPr
 
     return (
         <div className="flex flex-col h-full bg-transparent text-white">
-            <div className="p-4 border-b border-white/10 shrink-0 flex justify-between items-baseline">
+            <div className="px-4 py-4 border-b border-white/10 shrink-0 flex justify-between items-baseline">
                 <div className="text-xs text-white/50 font-medium tracking-wider">LATEST POSTS</div>
                 <div className="text-xs text-white/40">{posts.length}件</div>
             </div>
+
+            {/* Layer Settings Section */}
+            <LayerSettings
+                viirsEnabled={viirsEnabled}
+                setViirsEnabled={setViirsEnabled}
+                aerialEnabled={aerialEnabled}
+                setAerialEnabled={setAerialEnabled}
+            />
             
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {posts.map((post) => (

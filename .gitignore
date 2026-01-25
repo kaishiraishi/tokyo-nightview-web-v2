@@ -1,6 +1,11 @@
 node_modules/
 dist/
 .vite/
+.env
+.env.local
+.env.*
+!.env.example
+
 viirs_heat_tiles/
 public/viirs_heat_tiles/
 public/viirs_value_tiles/
