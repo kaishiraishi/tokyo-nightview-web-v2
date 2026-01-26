@@ -21,7 +21,7 @@ from pyproj import Geod
 TILE_DIR_REL = "../../tile_DSM/terrainrgb_out/tiles"
 # Resolve absolute path to avoid CWD issues
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TILE_DIR = os.path.normpath(os.path.join(BASE_DIR, TILE_DIR_REL))
+TILE_DIR = os.environ.get("TILE_DIR") or os.path.normpath(os.path.join(BASE_DIR, TILE_DIR_REL))
 
 ZOOM_LEVEL = 14
 
@@ -29,8 +29,8 @@ app = FastAPI(title="DSM Profile API (TerrainRGB)", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["https://kaisiraishi.github.io"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
