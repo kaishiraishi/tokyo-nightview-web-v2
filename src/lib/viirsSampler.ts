@@ -5,7 +5,7 @@ export type ViirsPoint = {
     intensity: number;
 };
 
-const VIIRS_TILE_URL = '/viirs_heat_tiles/tiles/{z}/{x}/{y}.png';
+const VIIRS_TILE_URL = `${import.meta.env.BASE_URL}viirs_heat_tiles/tiles/{z}/{x}/{y}.png`;
 const TILE_SIZE = 256;
 const DITHER = 6;
 
@@ -137,16 +137,16 @@ async function sampleViirsTile(
 
             // 閾値以上の部分を0-1に正規化
             const norm = Math.max(0, (jittered - threshold) / (1 - threshold));
-            
+
             // log圧縮: v' = log(1 + k*v) / log(1 + k)
             // これにより暗い部分が持ち上がり、明るい部分の飽和が抑えられる
-            const logCompressed = logK > 0 
+            const logCompressed = logK > 0
                 ? Math.log(1 + logK * norm) / Math.log(1 + logK)
                 : norm;
-            
+
             // gamma補正でメリハリ調整
             const adjusted = Math.pow(logCompressed, gamma);
-            
+
             const mean = emit * adjusted;
             const nParticles = Math.floor(mean + pixelSeed);
             if (nParticles <= 0) continue;
@@ -177,14 +177,14 @@ async function sampleViirsTile(
         const keepTop = Math.floor(maxPointsPerTile * 0.6);
         const topPoints = points.slice(0, keepTop);
         const remaining = points.slice(keepTop);
-        
+
         // 決定論的シャッフル（Fisher-Yates with seed）
         for (let i = remaining.length - 1; i > 0; i--) {
             const hash = ((x * 73856093) ^ (y * 19349663) ^ (i * 83492791)) >>> 0;
             const j = hash % (i + 1);
             [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
         }
-        
+
         const needMore = maxPointsPerTile - keepTop;
         return [...topPoints, ...remaining.slice(0, needMore)];
     }
@@ -207,7 +207,7 @@ async function getOrLoadTile(
     }
 ): Promise<ViirsPoint[]> {
     const key = tileKey(z, x, y, opts.stride, opts.emit);
-    
+
     // キャッシュにあれば返す
     if (tileCache.has(key)) {
         console.log('[VIIRS] cache hit:', key);
@@ -302,19 +302,19 @@ export async function buildViirsPoints(
             console.warn('[VIIRS] Missing cache for key:', key);
         }
     }
-    
+
     console.log('[VIIRS buildViirsPoints] tiles:', neededTiles.length, 'points:', allPoints.length, { stride, emit });
 
     // maxPoints を超えていたら、intensity で優先度付けしてサンプリング
     if (allPoints.length > maxPoints) {
         // intensity が高いものを優先的に残す
         allPoints.sort((a, b) => b.intensity - a.intensity);
-        
+
         // 上位をそのまま残し、下位をランダムサンプリング
         const keepTop = Math.floor(maxPoints * 0.7); // 上位70%は確保
         const topPoints = allPoints.slice(0, keepTop);
         const remaining = allPoints.slice(keepTop);
-        
+
         // 残りからランダムに選択
         const needMore = maxPoints - keepTop;
         for (let i = remaining.length - 1; i > 0; i--) {
@@ -322,7 +322,7 @@ export async function buildViirsPoints(
             [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
         }
         const selected = remaining.slice(0, needMore);
-        
+
         return [...topPoints, ...selected];
     }
 

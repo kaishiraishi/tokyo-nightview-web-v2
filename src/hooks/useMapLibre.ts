@@ -40,7 +40,7 @@ function addVIIRSNightLight(map: maplibregl.Map) {
     if (!map.getSource(VIIRS_SOURCE_ID)) {
         map.addSource(VIIRS_SOURCE_ID, {
             type: 'raster',
-            tiles: ['/viirs_heat_tiles/tiles/{z}/{x}/{y}.png'],
+            tiles: [`${import.meta.env.BASE_URL}viirs_heat_tiles/tiles/{z}/{x}/{y}.png`],
             tileSize: 256,
             minzoom: 10,
             maxzoom: 12,
