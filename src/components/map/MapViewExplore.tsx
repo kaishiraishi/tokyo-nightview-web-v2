@@ -1341,15 +1341,8 @@ export function MapViewExplore({
     }, [map, isLoaded, sourceLocation, targetLocation]);
 
 
-    // Center map on current location when available
-    useEffect(() => {
-        if (map && currentLocation && isLoaded) {
-            map.flyTo({
-                center: [currentLocation.lng, currentLocation.lat],
-                duration: 1000,
-            });
-        }
-    }, [map, currentLocation, isLoaded]);
+    // NOTE: Removed automatic flyTo on currentLocation change per user request.
+    // FlyTo is now only triggered manually via the CurrentLocationButton.
 
     // Track zoom level
     useEffect(() => {
