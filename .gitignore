@@ -13,3 +13,11 @@ tile_DSM/
 *.log
 .DS_Store
 **/.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Local Config/Docs
+SERVER_RESTART.md
+directory_report.md
