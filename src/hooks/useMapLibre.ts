@@ -202,7 +202,7 @@ function forceJapaneseLabels(map: maplibregl.Map) {
                     'coalesce',
                     ['get', 'name:ja'],
                     ['get', 'name'],
-                    ['get', 'name:en']
+                    ['get', 'name:latin']
                 ]);
             }
         }
