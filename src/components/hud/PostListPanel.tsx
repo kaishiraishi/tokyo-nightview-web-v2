@@ -1,5 +1,6 @@
 import type { Post } from '../../lib/postsApi';
 import { LayerSettings } from '../layout/LayerSettings';
+import { Inbox, Image as ImageIcon, MapPin } from 'lucide-react';
 
 type PostListPanelProps = {
     posts: Post[];
@@ -28,7 +29,7 @@ export function PostListPanel({
     if (posts.length === 0) {
         return (
             <div className="p-8 text-center flex flex-col items-center gap-2">
-                <span className="text-2xl opacity-30">📭</span>
+                <Inbox className="w-12 h-12 opacity-20 text-white" />
                 <p className="text-white/50 text-sm">まだ投稿がありません</p>
                 <p className="text-white/30 text-xs text-center">
                     右下のカメラボタンから<br/>最初の投稿をしてみましょう
@@ -70,7 +71,7 @@ export function PostListPanel({
                                         loading="lazy"
                                     />
                                 ) : (
-                                    <span className="text-2xl opacity-30">🌉</span>
+                                    <ImageIcon className="w-8 h-8 opacity-20" />
                                 )}
                             </div>
                             
@@ -82,8 +83,9 @@ export function PostListPanel({
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1.5 text-[10px] text-white/40">
+                                    <MapPin className="w-3 h-3" />
                                     <span className="truncate max-w-[120px]">
-                                        📍 {post.location.placeName || post.location.area || '場所不明'}
+                                        {post.location.placeName || post.location.area || '場所不明'}
                                     </span>
                                     <span>•</span>
                                     <span>{new Date(post.createdAt).toLocaleDateString()}</span>

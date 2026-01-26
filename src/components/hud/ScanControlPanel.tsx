@@ -2,6 +2,7 @@ import { ProfileChart } from '../../components/profile/ProfileChart';
 import type { ScanMode, ScanStep } from '../map/types';
 import type { RayResult, ProfileResponse } from '../../types/profile';
 import { LayerSettings } from '../layout/LayerSettings';
+import { AlertCircle, RefreshCcw } from 'lucide-react';
 
 type ScanControlPanelProps = {
     scanMode: ScanMode;
@@ -60,7 +61,7 @@ export function ScanControlPanel({
                             className={`
                                 flex-1 py-1.5 text-[10px] font-bold rounded-md transition-all
                                 ${scanMode === mode.key 
-                                    ? 'bg-yellow-400 text-black shadow-sm' 
+                                    ? 'bg-violet-700 text-white shadow-sm' 
                                     : 'text-white/60 hover:text-white hover:bg-white/5'}
                             `}
                         >
@@ -95,7 +96,8 @@ export function ScanControlPanel({
                     {scanStatus.error && (
                         <div className="px-3 py-2 bg-red-400/20 border border-red-400/50 rounded-lg mx-2 mb-2 animate-in fade-in slide-in-from-bottom-2">
                             <div className="text-[10px] font-bold text-red-400 flex items-center gap-1.5">
-                                <span>⚠️ Error:</span>
+                                <AlertCircle className="w-3 h-3" />
+                                <span>Error:</span>
                                 <span>{scanStatus.error}</span>
                             </div>
                         </div>
@@ -106,8 +108,8 @@ export function ScanControlPanel({
                 {isLoading && (
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-10">
                         <div className="flex flex-col items-center gap-2">
-                            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-yellow-400" />
-                            <span className="text-xs font-bold text-yellow-400">Loading...</span>
+                            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-violet-700" />
+                            <span className="text-xs font-bold text-violet-300">Loading...</span>
                         </div>
                     </div>
                 )}
@@ -119,7 +121,7 @@ export function ScanControlPanel({
                     onClick={onResetScan}
                     className="w-full py-2.5 rounded-lg border border-white/20 hover:bg-white/10 text-xs text-white/70 transition-colors flex items-center justify-center gap-2"
                 >
-                    <span>↺</span> 最初からやり直す
+                    <RefreshCcw className="w-3.5 h-3.5" /> 最初からやり直す
                 </button>
             </div>
         </div>

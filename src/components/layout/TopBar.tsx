@@ -131,7 +131,7 @@ export function TopBar({
                         onClick={() => onModeChange('analyze')}
                         className={`
                             h-10 w-10 flex items-center justify-center rounded-full transition-all
-                            ${mode === 'analyze' ? 'bg-yellow-400 text-black shadow-sm' : 'text-white/70 hover:text-white'}
+                            ${mode === 'analyze' ? 'bg-violet-700 text-white shadow-sm' : 'text-white/70 hover:text-white'}
                         `}
                         title="分析モード"
                     >
@@ -152,16 +152,16 @@ export function TopBar({
                         return (
                             <div key={step.key} className="flex flex-1 items-center">
                                 {index > 0 && (
-                                    <div className={`w-2 h-0.5 mx-0.5 rounded-full ${isCompleted ? 'bg-yellow-400/50' : 'bg-white/10'}`} />
+                                    <div className={`w-2 h-0.5 mx-0.5 rounded-full ${isCompleted ? 'bg-violet-700/50' : 'bg-white/10'}`} />
                                 )}
                                 <button
                                     onClick={() => onStepClick?.(step.key)}
                                     className={`
                                         flex-1 px-1 py-1.5 rounded-full text-[10px] font-bold transition-all whitespace-nowrap pointer-events-auto
                                         ${isActive 
-                                            ? 'bg-yellow-400 text-black shadow-sm scale-105' 
+                                            ? 'bg-violet-700 text-white shadow-sm scale-105' 
                                             : isCompleted 
-                                                ? 'bg-yellow-400/20 text-yellow-400 hover:bg-yellow-400/30' 
+                                                ? 'bg-violet-700/20 text-violet-300 hover:bg-violet-700/30' 
                                                 : 'text-white/40 hover:text-white/60'
                                         }
                                     `}

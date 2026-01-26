@@ -243,8 +243,8 @@ export function MapOverlays({
                 radiusMinPixels: 6,
                 radiusMaxPixels: 20,
                 getPosition: d => [d.location.lng, d.location.lat],
-                getFillColor: [245, 158, 11], // #f59e0b
-                getLineColor: [17, 24, 39], // #111827
+                getFillColor: [109, 40, 217], // Violet-700
+                getLineColor: [255, 255, 255], // White
                 getLineWidth: 2,
                 getRadius: 6,
                 parameters: {
@@ -394,7 +394,7 @@ export function MapOverlays({
                     rimSegs.push({
                         source: ringPoints[i],
                         target: ringPoints[i + 1],
-                        color: [80, 220, 255, 160],
+                        color: [196, 181, 253, 160],
                     });
                 }
             }
@@ -459,7 +459,7 @@ export function MapOverlays({
                     rays.push({
                         source: [startLng, startLat, startZ],
                         target: [endLng, endLat, endZ],
-                        color: [80, 220, 255, 180], // Cyan
+                        color: [196, 181, 253, 180], // Cyan
                         zKind,
                     });
 
@@ -485,7 +485,7 @@ export function MapOverlays({
                         const hitZ = startZ + t * (endZ - startZ);
                         hits.push({
                             position: [H.lng, H.lat, hitZ + 0.2],
-                            color: [245, 158, 11],
+                            color: [109, 40, 217], // Violet-700
                             radius: 8,
                         });
                     }
@@ -549,7 +549,7 @@ export function MapOverlays({
                     rays.push({
                         source: [startLng, startLat, startZ],
                         target: [endLng, endLat, endZ],
-                        color: isCenter ? [255, 255, 255, 100] : [80, 220, 255, 120],
+                        color: isCenter ? [255, 255, 255, 100] : [196, 181, 253, 120],
                     });
 
                     return [endLng, endLat, endZ] as [number, number, number];
@@ -571,7 +571,7 @@ export function MapOverlays({
                     const az1 = centerAzimuth - deltaTheta / 2 + deltaTheta * t1;
                     const a0 = drawPreviewRay(az0, false);
                     const a1 = drawPreviewRay(az1, false);
-                    arcSegs.push({ source: a0, target: a1, color: [80, 220, 255, 140] });
+                    arcSegs.push({ source: a0, target: a1, color: [196, 181, 253, 140] });
                 }
 
                 rimSegs = arcSegs;
@@ -610,7 +610,7 @@ export function MapOverlays({
 
                 hits.push({
                     position: [H.lng, H.lat, hitZ + 0.2],
-                    color: [245, 158, 11],
+                    color: [109, 40, 217], // Violet-700
                     radius: 8,
                 });
             }

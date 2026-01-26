@@ -158,7 +158,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                 key={i}
                                 d={path}
                                 fill="none"
-                                stroke="#60a5fa" // blue-400
+                                stroke="#c4b5fd" // Violet-300
                                 strokeWidth="2"
                             />
                         ))}
@@ -223,7 +223,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                     y1={-padding.top}
                                     x2={xScale(distances_m[localHoveredIndex])}
                                     y2={chartHeight + padding.bottom}
-                                    stroke="#ef4444"
+                                    stroke="#c4b5fd" // Violet-300
                                     strokeWidth="1"
                                     strokeDasharray="4 2"
                                     pointerEvents="none"
@@ -233,7 +233,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                     cx={xScale(distances_m[localHoveredIndex])}
                                     cy={yScale(elev_m[localHoveredIndex]!)}
                                     r={5}
-                                    fill="#ef4444"
+                                    fill="#c4b5fd" // Violet-300
                                     stroke="white"
                                     strokeWidth="2"
                                     pointerEvents="none"
@@ -313,7 +313,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                         y1={-padding.top}
                                         x2={xScale(occlusionDistance)}
                                         y2={chartHeight + padding.bottom}
-                                        stroke="#f59e0b"
+                                        stroke="#6d28d9" // Violet-700
                                         strokeWidth="2"
                                         strokeDasharray="4 2"
                                         pointerEvents="none"
@@ -323,7 +323,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                         cx={xScale(occlusionDistance)}
                                         cy={yScale(occlusionElev)}
                                         r={7}
-                                        fill="#f59e0b"
+                                        fill="#6d28d9" // Violet-700
                                         stroke="white"
                                         strokeWidth="2"
                                         pointerEvents="none"
@@ -335,7 +335,7 @@ export function ProfileChart({ profile, onHover, onClick, occlusionDistance }: P
                                             y={yScale(occlusionElev) - 50}
                                             width="100"
                                             height="35"
-                                            fill="#f59e0b"
+                                            fill="#6d28d9" // Violet-700
                                             stroke="white"
                                             strokeWidth="2"
                                             rx="4"

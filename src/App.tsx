@@ -25,7 +25,7 @@ function App() {
     }, []);
 
     return (
-        <div className="relative w-screen h-screen overflow-hidden bg-gray-900">
+        <div className="relative w-screen h-screen overflow-hidden bg-black">
             {/* Full Screen Map */}
             <div className="absolute inset-0">
                     <MapViewExplore

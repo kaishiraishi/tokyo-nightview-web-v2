@@ -25,13 +25,13 @@ export function LayerSettings({
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${viirsEnabled ? 'bg-yellow-400' : 'bg-white/20'}`} />
+                            <div className={`w-2 h-2 rounded-full ${viirsEnabled ? 'bg-violet-300' : 'bg-white/20'}`} />
                             <span className="text-sm text-white/90">夜間光 (VIIRS)</span>
                         </div>
                         <button
                             onClick={() => setViirsEnabled(!viirsEnabled)}
                             className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${viirsEnabled
-                                    ? 'bg-yellow-400 text-black'
+                                    ? 'bg-violet-700 text-white'
                                     : 'bg-white/10 text-white/50 hover:bg-white/20'
                                 }`}
                         >
@@ -43,7 +43,7 @@ export function LayerSettings({
                 {/* Aerial Photo Layer */}
                 <div className="flex items-center justify-between border-t border-white/5 pt-3">
                     <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${aerialEnabled ? 'bg-blue-400' : 'bg-white/20'}`} />
+                        <div className={`w-2 h-2 rounded-full ${aerialEnabled ? 'bg-blue-500' : 'bg-white/20'}`} />
                         <span className="text-sm text-white/90">航空写真 (国土地理院)</span>
                     </div>
                     <button

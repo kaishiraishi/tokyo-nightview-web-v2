@@ -194,12 +194,12 @@ export function AppMenu({
                                 className={`
                                   flex flex-col items-center justify-center rounded-2xl py-3 px-2 border transition-all
                                   ${fanConfig?.deltaTheta === preset.value
-                                    ? 'bg-yellow-400 border-yellow-400 text-black shadow-lg shadow-yellow-400/20'
+                                    ? 'bg-violet-700 border-violet-700 text-white shadow-lg shadow-violet-700/20'
                                     : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10 hover:text-white'}
                                 `}
                             >
                                 <span className="text-xs font-bold">{preset.label}</span>
-                                <span className={`text-[10px] mt-0.5 ${fanConfig?.deltaTheta === preset.value ? 'text-black/60' : 'text-white/20'}`}>
+                                <span className={`text-[10px] mt-0.5 ${fanConfig?.deltaTheta === preset.value ? 'text-white/60' : 'text-white/20'}`}>
                                   {preset.value}°
                                 </span>
                             </button>

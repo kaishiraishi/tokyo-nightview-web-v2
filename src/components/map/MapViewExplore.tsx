@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Camera } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Pin, Send, AlertCircle } from 'lucide-react';
 import { LayerMenu } from '../layout/LayerMenu';
 import { TopBar } from '../layout/TopBar';
 import { ScanControlPanel } from '../hud/ScanControlPanel';
@@ -1479,9 +1479,9 @@ export function MapViewExplore({
                                 }
                             }
                         }}
-                        className="pointer-events-auto bg-yellow-400 text-black px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-yellow-300 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
+                        className="pointer-events-auto bg-violet-700 text-white px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-violet-600 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
                     >
-                        <span>📍</span>
+                        <MapPin className="w-4 h-4" />
                         {scanStep === 'selecting_source' ? '観測地点を確定' : '目標地点を確定'}
                     </button>
                 </div>
@@ -1513,7 +1513,7 @@ export function MapViewExplore({
                 {locateError && (
                     <div className="bg-red-500/95 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-4 pointer-events-auto border border-white/20">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm">📍</span>
+                            <MapPin className="w-4 h-4" />
                             <span>{locateError}</span>
                         </div>
                         <button 
@@ -1527,7 +1527,7 @@ export function MapViewExplore({
                 {error && (
                     <div className="bg-red-500/95 text-white px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex flex-col gap-1 border border-white/20 animate-in fade-in slide-in-from-top-4 pointer-events-auto">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm">⚠️</span>
+                            <AlertCircle className="w-4 h-4" />
                             <span>分析エラー</span>
                         </div>
                         <div className="text-[10px] font-normal opacity-90 leading-tight">
@@ -1629,13 +1629,13 @@ export function MapViewExplore({
                         ref={postButtonRef}
                         type="button"
                         onClick={() => setIsPostModalOpen((prev) => !prev)}
-                        className="group bg-black/60 backdrop-blur-md border border-yellow-400/60 text-white rounded-full shadow-lg h-11 w-11 hover:bg-yellow-400/20 hover:border-yellow-300 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                        className="group bg-black/60 backdrop-blur-md border border-violet-700/60 text-white rounded-full shadow-lg h-11 w-11 hover:bg-violet-700/20 hover:border-violet-600 active:scale-95 transition-all duration-200 flex items-center justify-center"
                         aria-label="投稿する"
                         aria-pressed={isPostModalOpen}
                         disabled={!isSupabaseConfigured}
                         title={isSupabaseConfigured ? '投稿する' : 'Supabase未設定'}
                     >
-                        <Camera className="w-5 h-5 text-yellow-400 group-hover:scale-110 transition-transform" />
+                        <Camera className="w-5 h-5 text-violet-300 group-hover:scale-110 transition-transform" />
                     </button>
                     {isPostModalOpen && (
                         <div
@@ -1654,7 +1654,7 @@ export function MapViewExplore({
                                                 placeholder="夜景の感想を書いてください"
                                                 maxLength={280}
                                                 rows={3}
-                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none resize-none"
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-violet-700/50 focus:outline-none resize-none"
                                             />
                                             <div className="text-right text-[10px] text-white/40 mt-1">
                                                 {postMessage.length}/280
@@ -1677,11 +1677,11 @@ export function MapViewExplore({
                                                 />
                                                 <label
                                                     htmlFor="photo-upload"
-                                                    className="flex items-center justify-center w-full rounded-lg border border-dashed border-white/20 bg-white/5 px-3 py-4 text-xs text-white/60 hover:bg-white/10 hover:border-yellow-400/50 cursor-pointer transition-all"
+                                                    className="flex items-center justify-center w-full rounded-lg border border-dashed border-white/20 bg-white/5 px-3 py-4 text-xs text-white/60 hover:bg-white/10 hover:border-violet-700/50 cursor-pointer transition-all"
                                                 >
                                                     {postPhotoFile ? (
-                                                        <span className="text-yellow-400 flex items-center gap-2">
-                                                            <span>🖼️</span>
+                                                        <span className="text-violet-300 flex items-center gap-2">
+                                                            <ImageIcon className="w-4 h-4" />
                                                             <span className="truncate max-w-[200px]">{postPhotoFile.name}</span>
                                                             <button
                                                                 type="button"
@@ -1704,13 +1704,13 @@ export function MapViewExplore({
                                                     value={postPhotoUrl}
                                                     onChange={(e) => setPostPhotoUrl(e.target.value)}
                                                     placeholder="または画像のURLを入力"
-                                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none"
+                                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-violet-700/50 focus:outline-none"
                                                 />
                                             </div>
                                         </div>
                                         <div>
                                             <label className="block text-xs text-white/60 mb-2">
-                                                📍 投稿場所
+                                                <MapPin className="w-3 h-3 inline mr-1" /> 投稿場所
                                             </label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
@@ -1718,13 +1718,13 @@ export function MapViewExplore({
                                                         type="button"
                                                         onClick={() => setPostLocationMode('current')}
                                                         disabled={!currentLocation}
-                                                        className={`flex-1 rounded-lg border py-2 text-xs transition-all ${
+                                                        className={`flex-1 rounded-lg border py-2 text-xs transition-all flex items-center justify-center gap-1.5 ${
                                                             postLocationMode === 'current'
-                                                                ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
+                                                                ? 'border-violet-700 bg-violet-700/20 text-violet-300'
                                                                 : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed'
                                                         }`}
                                                     >
-                                                        📍 現在位置
+                                                        <MapPin className="w-3.5 h-3.5" /> 現在位置
                                                     </button>
                                                 </div>
                                                 <button
@@ -1734,15 +1734,16 @@ export function MapViewExplore({
                                                         setIsPinSelecting(true);
                                                         setIsPostModalOpen(false);
                                                     }}
-                                                    className={`w-full rounded-lg border py-2 text-xs transition-all ${
+                                                    className={`w-full rounded-lg border py-2 text-xs transition-all flex items-center justify-center gap-1.5 ${
                                                         postLocationMode === 'pin' && postPinLocation
-                                                            ? 'border-yellow-400 bg-yellow-400/20 text-yellow-400'
+                                                            ? 'border-violet-700 bg-violet-700/20 text-violet-300'
                                                             : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
                                                     }`}
                                                 >
+                                                    <Pin className="w-3.5 h-3.5" />
                                                     {postLocationMode === 'pin' && postPinLocation
-                                                        ? `📌 ピン設定済み (${postPinLocation.lat.toFixed(4)}, ${postPinLocation.lng.toFixed(4)})`
-                                                        : '📌 地図をタップしてピンを刺す'}
+                                                        ? `ピン設定済み (${postPinLocation.lat.toFixed(4)}, ${postPinLocation.lng.toFixed(4)})`
+                                                        : '地図をタップしてピンを刺す'}
                                                 </button>
                                             </div>
                                             {!currentLocation && postLocationMode !== 'current' && (
@@ -1770,9 +1771,9 @@ export function MapViewExplore({
                                                 type="button"
                                                 onClick={handleSubmitPost}
                                                 disabled={!postMessage.trim() || isPosting}
-                                                className="flex-1 rounded-lg bg-yellow-400 py-2 text-sm font-medium text-black hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                className="flex-1 rounded-lg bg-violet-700 py-2 text-sm font-medium text-white hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                             >
-                                                {isPosting ? '投稿中...' : '投稿する'}
+                                                {isPosting ? '投稿中...' : <><Send className="w-4 h-4" /> 投稿する</>}
                                             </button>
                                         </div>
                                     </div>
@@ -1793,15 +1794,16 @@ export function MapViewExplore({
             {/* ピン選択モード時のバナー */}
             {isPinSelecting && (
                 <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50">
-                    <div className="bg-yellow-400 text-black px-4 py-2 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
-                        <span>📌 地図をタップして投稿場所を選択</span>
+                    <div className="bg-violet-700 text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-3 text-sm font-medium">
+                        <Pin className="w-4 h-4" />
+                        <span>地図をタップして投稿場所を選択</span>
                         <button
                             type="button"
                             onClick={() => {
                                 setIsPinSelecting(false);
                                 setIsPostModalOpen(true);
                             }}
-                            className="bg-black/20 hover:bg-black/30 px-2 py-1 rounded text-xs"
+                            className="bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-xs"
                         >
                             キャンセル
                         </button>

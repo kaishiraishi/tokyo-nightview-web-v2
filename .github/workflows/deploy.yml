@@ -28,6 +28,9 @@ jobs:
           VITE_CARTO_STYLE_DARK: ${{ secrets.VITE_CARTO_STYLE_DARK }}
           VITE_CARTO_STYLE_LIGHT: ${{ secrets.VITE_CARTO_STYLE_LIGHT }}
 
+      - name: Verify Tiles
+        run: ls -lah dist/viirs_heat_tiles | head
+
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
