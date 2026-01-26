@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Camera, MapPin, Image as ImageIcon, Pin, Send, AlertCircle } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Pin, Send, AlertCircle, Play, Check, Zap } from 'lucide-react';
 import { LayerMenu } from '../layout/LayerMenu';
 import { TopBar } from '../layout/TopBar';
 import { ScanControlPanel } from '../hud/ScanControlPanel';
@@ -156,12 +156,109 @@ export function MapViewExplore({
     const [hoveredPostId, setHoveredPostId] = useState<string | null>(null);
     const hoveredPostIdRef = useRef<string | number | null>(null);
     const postPopupsRef = useRef<Map<string, maplibregl.Popup>>(new Map());
+
+    // --- Core Analytics Logic ---
+
+    // Execute Scan Logic (Manual Trigger)
+    const executeScan = useCallback(async (configOverride?: Partial<FanConfig>, targetOverride?: LngLat) => {
+        if (!sourceLocation) {
+            setError("観測点が設定されていません");
+            return;
+        }
+        const activeTarget = targetOverride ?? targetLocation;
+        if (isFanMode && !activeTarget) {
+            setError("目標点が設定されていません");
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+
+        try {
+            const currentConfig = { ...fanConfig, ...configOverride };
+
+            if (isFanMode && activeTarget) {
+                // Fan Scan
+                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
+                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
+                const distanceM = start.distanceTo(end);
+                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
+
+                const centerProfile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
+                onProfileChange(centerProfile);
+
+                const elevA = centerProfile.elev_m[0];
+                const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
+
+                const results = await generateFanRays(sourceLocation, activeTarget, currentConfig, sightAngle, sourceZ0);
+                setFanRayResults(results);
+
+                const centerIndex = Math.floor(currentConfig.rayCount / 2);
+                const centerResult = results[centerIndex];
+                setRayResult(centerResult);
+                onRayResultChange(centerResult);
+            } else if (activeTarget) {
+                // Single Ray
+                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
+                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
+                const distanceM = start.distanceTo(end);
+                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
+
+                const profile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
+                const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
+                setRayResult(result);
+                onRayResultChange(result);
+                onProfileChange(profile);
+            }
+
+            // スキャン完了後の遷移
+            if (scanMode === '360') {
+                handleSetScanStep('complete');
+            } else {
+                handleSetScanStep('selecting_target');
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to execute scan';
+            setError(message);
+        } finally {
+            setLoading(false);
+        }
+    }, [
+        sourceLocation,
+        targetLocation,
+        isFanMode,
+        fanConfig,
+        sightAngle,
+        scanMode,
+        onProfileChange,
+        onRayResultChange,
+        handleSetScanStep
+    ]);
     
     // --- UI Handlers (New) ---
     const handleScanModeChange = useCallback((newMode: ScanMode) => {
         onScanModeChange(newMode);
         handleSetScanStep('idle');
     }, [onScanModeChange, handleSetScanStep]);
+
+    // --- Action Button Handler ---
+    const handleCommitStep = useCallback(() => {
+        if (scanStep === 'adjusting_range' && sourceLocation) {
+            const nextRange = Math.max(RANGE_MIN_M, Math.min(RANGE_MAX_M, previewRangeM ?? scanRangeM));
+            setScanRangeM(nextRange);
+            setPreviewRangeM(null);
+            handleSetScanStep('scanning');
+            const northTarget = calculateEndpoint(sourceLocation, 0, nextRange);
+            setTargetLocation(northTarget);
+            executeScan({ deltaTheta: 360 }, northTarget);
+        } else if (scanStep === 'adjusting_angle') {
+            if (previewDeltaTheta !== null) {
+                fanDeltaThetaRef.current = previewDeltaTheta;
+                setFanConfig(prev => ({ ...prev, deltaTheta: previewDeltaTheta }));
+                executeScan({ deltaTheta: previewDeltaTheta });
+            }
+        }
+    }, [scanStep, sourceLocation, previewRangeM, scanRangeM, previewDeltaTheta, executeScan, handleSetScanStep]);
 
     // Guidance for TopBar
     const currentGuidance = useMemo(() => {
@@ -1076,10 +1173,9 @@ export function MapViewExplore({
             Math.max(RANGE_MIN_M, Math.min(RANGE_MAX_M, value));
 
         const handleMouseMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
-            // Prevent page scrolling/panning during adjustment
-            if (e.originalEvent) {
-                // Not calling preventDefault here anymore to allow potential map pan if desired,
-                // but MapLibre already handles dragPan.disable()
+            // マルチタッチ（ピンチ操作など）の場合は、距離の調整をスキップして地図操作を優先させる
+            if (e.originalEvent && 'touches' in e.originalEvent && e.originalEvent.touches.length > 1) {
+                return;
             }
             if (!e.lngLat) return;
             const distance = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat)
@@ -1105,7 +1201,6 @@ export function MapViewExplore({
         
         // Disable map movement while adjusting on mobile
         map.dragPan.disable();
-        map.touchZoomRotate.disable();
 
         return () => {
             map.off('mousemove', handleMouseMove);
@@ -1113,7 +1208,6 @@ export function MapViewExplore({
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
             map.dragPan.enable();
-            map.touchZoomRotate.enable();
         };
     }, [map, isLoaded, scanStep, sourceLocation, previewRangeM, scanRangeM, scanMode, mode, handleSetScanStep]);
 
@@ -1159,9 +1253,9 @@ export function MapViewExplore({
         }
 
         const handleMouseMove = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
-            // Prevent page scrolling/panning during adjustment
-            if (e.originalEvent) {
-                // e.originalEvent.preventDefault();
+            // マルチタッチ（ピンチ操作など）の場合は、扇の調整をスキップして地図操作を優先させる
+            if (e.originalEvent && 'touches' in e.originalEvent && e.originalEvent.touches.length > 1) {
+                return;
             }
             if (!e.lngLat) return;
             const centerAz = calculateAzimuth(sourceLocation, targetLocation);
@@ -1189,7 +1283,6 @@ export function MapViewExplore({
         
         // Disable map movement while adjusting on mobile
         map.dragPan.disable();
-        map.touchZoomRotate.disable();
 
         return () => {
             map.off('mousemove', handleMouseMove);
@@ -1197,76 +1290,8 @@ export function MapViewExplore({
             map.off('click', handleClick);
             map.getCanvas().style.cursor = '';
             map.dragPan.enable();
-            map.touchZoomRotate.enable();
         };
     }, [map, isLoaded, scanStep, sourceLocation, targetLocation, previewDeltaTheta, fanConfig.deltaTheta, scanMode, mode, handleSetScanStep]);
-
-
-    // Execute Scan Logic (Manual Trigger)
-    const executeScan = async (configOverride?: Partial<FanConfig>, targetOverride?: LngLat) => {
-        if (!sourceLocation) {
-            setError("観測点が設定されていません");
-            return;
-        }
-        const activeTarget = targetOverride ?? targetLocation;
-        if (isFanMode && !activeTarget) {
-            setError("目標点が設定されていません");
-            return;
-        }
-
-        setLoading(true);
-        setError(null);
-
-        try {
-            const currentConfig = { ...fanConfig, ...configOverride };
-
-            if (isFanMode && activeTarget) {
-                // Fan Scan
-                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
-                const distanceM = start.distanceTo(end);
-                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
-
-                const centerProfile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
-                onProfileChange(centerProfile);
-
-                const elevA = centerProfile.elev_m[0];
-                const sourceZ0 = (typeof elevA === 'number' && Number.isFinite(elevA)) ? elevA + 1.6 : 1.6;
-
-                const results = await generateFanRays(sourceLocation, activeTarget, currentConfig, sightAngle, sourceZ0);
-                setFanRayResults(results);
-
-                const centerIndex = Math.floor(currentConfig.rayCount / 2);
-                const centerResult = results[centerIndex];
-                setRayResult(centerResult);
-                onRayResultChange(centerResult);
-            } else if (activeTarget) {
-                // Single Ray
-                const start = new maplibregl.LngLat(sourceLocation.lng, sourceLocation.lat);
-                const end = new maplibregl.LngLat(activeTarget.lng, activeTarget.lat);
-                const distanceM = start.distanceTo(end);
-                const sampleCount = Math.min(500, Math.max(120, Math.ceil(distanceM / 10)));
-
-                const profile = await fetchProfile(sourceLocation, activeTarget, sampleCount);
-                const result = findFirstOcclusion(profile, sightAngle, sourceLocation);
-                setRayResult(result);
-                onRayResultChange(result);
-                onProfileChange(profile);
-            }
-
-            // スキャン完了後の遷移
-            if (scanMode === '360') {
-                handleSetScanStep('complete');
-            } else {
-                handleSetScanStep('selecting_target');
-            }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'Failed to execute scan';
-            setError(message);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     // Fly to clicked point on profile chart
     useEffect(() => {
@@ -1629,6 +1654,21 @@ export function MapViewExplore({
                     },
                 }}
             />
+
+            {/* Mobile Action Button - Analysis Trigger */}
+            {isMobile && (scanStep === 'adjusting_range' || scanStep === 'adjusting_angle') && (
+                <div className={`absolute left-1/2 -translate-x-1/2 z-[8000] transition-all duration-300 ${
+                    isLayerMenuOpen ? 'bottom-[-100px] opacity-0 pointer-events-none' : 'bottom-[calc(80px+env(safe-area-inset-bottom))]'
+                }`}>
+                    <button
+                        onClick={handleCommitStep}
+                        className="pointer-events-auto bg-violet-700 text-white px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-violet-600 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
+                    >
+                        <Zap className="w-4 h-4" />
+                        分析を開始
+                    </button>
+                </div>
+            )}
 
             {/* Bottom Right Controls */}
             <div className={`absolute right-6 flex items-end gap-4 md:right-8 z-[7000] pointer-events-auto transition-all duration-300 ${

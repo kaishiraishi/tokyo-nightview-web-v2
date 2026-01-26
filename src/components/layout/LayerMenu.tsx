@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, type ReactNode } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 type LayerMenuProps = {
     isOpen: boolean;
@@ -81,12 +82,15 @@ export function LayerMenu({ isOpen, onToggle, children }: LayerMenuProps) {
                     <div className="w-12 h-1.5 bg-white/20 rounded-full" />
                 </div>
             ) : (
-                // Desktop Toggle Button (Outside, sticking out)
+                // Desktop Toggle Button (Vertically Centered Tab - Larger & More Visible)
                 <button
                     onClick={onToggle}
-                    className="absolute -right-12 top-0 w-10 h-12 bg-black/60 backdrop-blur-md border border-l-0 border-white/10 rounded-r-xl flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors shadow-lg"
+                    className="absolute -right-10 top-1/2 -translate-y-1/2 w-10 h-24 bg-black/80 backdrop-blur-xl border border-l-0 border-white/20 rounded-r-2xl flex items-center justify-center text-white/50 hover:text-white hover:bg-black/90 transition-all duration-300 group shadow-[10px_0_30px_rgba(0,0,0,0.5)]"
                 >
-                    {isOpen ? '◀' : '▶'}
+                    <div className="flex flex-col items-center gap-2 group-hover:scale-110 transition-transform">
+                        {isOpen ? <ChevronLeft size={24} /> : <ChevronRight size={24} />}
+                        <div className="w-1 h-10 bg-white/10 rounded-full group-hover:bg-violet-500/50 transition-colors" />
+                    </div>
                 </button>
             )}
 
