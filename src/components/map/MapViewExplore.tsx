@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Camera, MapPin, Image as ImageIcon, Pin, Send, AlertCircle, Play, Check, Zap } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Pin, Send, AlertCircle, Zap } from 'lucide-react';
 import { LayerMenu } from '../layout/LayerMenu';
 import { TopBar } from '../layout/TopBar';
 import { ScanControlPanel } from '../hud/ScanControlPanel';
