@@ -1,4 +1,4 @@
-import { Layers, Image as ImageIcon } from 'lucide-react';
+import { Layers } from 'lucide-react';
 
 type LayerSettingsProps = {
     viirsEnabled: boolean;
@@ -19,7 +19,7 @@ export function LayerSettings({
                 <Layers className="w-4 h-4 text-white/50" />
                 <span className="text-xs font-bold text-white/70 uppercase tracking-wider">表示レイヤー設定</span>
             </div>
-            
+
             <div className="grid grid-cols-1 gap-4">
                 {/* VIIRS Layer */}
                 <div className="space-y-2">
@@ -30,11 +30,10 @@ export function LayerSettings({
                         </div>
                         <button
                             onClick={() => setViirsEnabled(!viirsEnabled)}
-                            className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${
-                                viirsEnabled 
-                                    ? 'bg-yellow-400 text-black' 
+                            className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${viirsEnabled
+                                    ? 'bg-yellow-400 text-black'
                                     : 'bg-white/10 text-white/50 hover:bg-white/20'
-                            }`}
+                                }`}
                         >
                             {viirsEnabled ? 'ON' : 'OFF'}
                         </button>
@@ -49,11 +48,10 @@ export function LayerSettings({
                     </div>
                     <button
                         onClick={() => setAerialEnabled(!aerialEnabled)}
-                        className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${
-                            aerialEnabled 
-                                ? 'bg-blue-500 text-white' 
+                        className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${aerialEnabled
+                                ? 'bg-blue-500 text-white'
                                 : 'bg-white/10 text-white/50 hover:bg-white/20'
-                        }`}
+                            }`}
                     >
                         {aerialEnabled ? 'ON' : 'OFF'}
                     </button>
