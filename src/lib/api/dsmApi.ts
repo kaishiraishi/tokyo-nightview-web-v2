@@ -1,7 +1,6 @@
 import type { LngLat, ProfileResponse } from '../../types/profile';
 
-const API_BASE =
-    import.meta.env.VITE_DSM_API_BASE ?? (import.meta.env.DEV ? '/api' : 'http://127.0.0.1:8000');
+const API_BASE = import.meta.env.VITE_DSM_API_BASE_URL || 'http://127.0.0.1:8000';
 
 export async function fetchProfile(
     start: LngLat,
