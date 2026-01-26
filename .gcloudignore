@@ -1,0 +1,10 @@
+
+.git/
+.github/
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+!tools/dsm-api/
+!tile_DSM/

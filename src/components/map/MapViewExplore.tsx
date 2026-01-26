@@ -123,6 +123,8 @@ export function MapViewExplore({
     const hasAutoSetSourceRef = useRef(false);
     const hasInitialFlyRef = useRef(false);
 
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
     const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
     const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(true);
 
@@ -1036,12 +1038,23 @@ export function MapViewExplore({
         if (mode !== 'explore') return;
         if (!map || !isLoaded || scanStep !== 'selecting_source') return;
 
-        const handleSourceClick = (_e: maplibregl.MapMouseEvent) => {
+        const handleSourceClick = (e: maplibregl.MapMouseEvent) => {
             if (Date.now() - lastStepChangeTimeRef.current < 200) return;
-            // 地図クリックでの決定を無効化（「確定」ボタンを使用させる）
-            // 誤操作防止のため、デスクトップでもボタンまたはダブルクリック等への移行を検討
-            // ここでは一貫性のためにモバイル同様にクリックを無視する
-            return;
+            
+            // デスクトップではクリックで地点を決定
+            if (!isMobile) {
+                const pos = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+                setSourceLocation(pos);
+                if (scanMode === '360') {
+                    setTargetLocation(null);
+                    setPreviewRangeM(scanRangeM);
+                    setFanRayResults([]);
+                    setRayResult(null);
+                    handleSetScanStep('adjusting_range');
+                } else {
+                    handleSetScanStep('selecting_target');
+                }
+            }
         };
 
         map.getCanvas().style.cursor = 'crosshair';
@@ -1110,10 +1123,19 @@ export function MapViewExplore({
 
         setPreviewDeltaTheta(null);
 
-        const handleTargetClick = (_e: maplibregl.MapMouseEvent) => {
+        const handleTargetClick = (e: maplibregl.MapMouseEvent) => {
             if (Date.now() - lastStepChangeTimeRef.current < 200) return;
-            // 地図クリックでの決定を無効化（「確定」ボタンを使用させる）
-            return;
+            // デスクトップではクリックで地点を決定
+            if (!isMobile) {
+                const pos = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+                setTargetLocation(pos);
+                if (scanMode === '360') {
+                    handleSetScanStep('scanning');
+                    executeScan({ deltaTheta: 360 }, pos);
+                } else {
+                    handleSetScanStep('adjusting_angle');
+                }
+            }
         };
 
         map.getCanvas().style.cursor = 'crosshair';
@@ -1427,8 +1449,6 @@ export function MapViewExplore({
 
     // Double-click is reserved for source selection.
 
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-
     return (
         <div className="relative w-full h-full text-white">
             <div 
@@ -1437,7 +1457,7 @@ export function MapViewExplore({
             />
 
             {/* Center Crosshair for Location selection - Simple, Small & Thick */}
-            {((isMobile && scanStep === 'idle') || scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
+            {(isMobile && (scanStep === 'idle' || scanStep === 'selecting_source' || scanStep === 'selecting_target')) && (
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[3500]">
                     <div className="relative w-8 h-8 flex items-center justify-center">
                         <div className="absolute w-full h-[2px] bg-white/90 shadow-[0_0_4px_rgba(0,0,0,0.5)]" />
@@ -1447,7 +1467,7 @@ export function MapViewExplore({
             )}
 
             {/* Location Selection Confirmation Button */}
-            {(scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
+            {isMobile && (scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
                 <div className={`absolute left-1/2 -translate-x-1/2 z-[7000] flex flex-col items-center gap-2 pointer-events-none transition-all duration-300 ${
                     isMobile 
                         ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0' : 'bottom-20') 
@@ -1508,8 +1528,8 @@ export function MapViewExplore({
                 onFanConfigChange={setFanConfig}
             />
 
-            {/* Error Notifications - Top Center */}
-            <div className="fixed top-36 left-1/2 -translate-x-1/2 flex flex-col gap-2 z-[7000] w-[90%] max-w-sm pointer-events-none">
+            {/* Error Notifications - Align with TopBar on Desktop */}
+            <div className="absolute top-36 left-4 right-4 md:left-auto md:right-4 md:w-[520px] flex flex-col gap-2 z-[7000] pointer-events-none">
                 {locateError && (
                     <div className="bg-red-500/95 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-4 pointer-events-auto border border-white/20">
                         <div className="flex items-center gap-2">

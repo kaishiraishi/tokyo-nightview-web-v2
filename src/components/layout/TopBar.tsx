@@ -52,7 +52,7 @@ export function TopBar({
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     return (
-        <div className="absolute top-4 left-4 right-4 md:right-auto md:w-[520px] z-[5000] flex flex-col gap-2 pointer-events-none">
+        <div className="absolute top-4 left-4 right-4 md:left-auto md:right-4 md:w-[520px] z-[5000] flex flex-col gap-2 pointer-events-none">
             {/* Search & Mode Container - Floating Island */}
             <div className="flex items-center gap-2 pointer-events-auto">
                 <button
