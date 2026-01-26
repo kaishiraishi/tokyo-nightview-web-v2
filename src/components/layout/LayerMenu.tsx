@@ -58,12 +58,12 @@ export function LayerMenu({ isOpen, onToggle, children }: LayerMenuProps) {
             className={`
                 z-[4000] transition-transform duration-300 ease-out
                 ${isMobile 
-                    ? 'fixed bottom-0 left-0 right-0 bg-black/80 backdrop-blur-md rounded-t-2xl border-t border-white/10 shadow-[0_-8px_30px_rgba(0,0,0,0.5)]' 
+                    ? 'fixed bottom-0 left-0 right-0 bg-black/80 backdrop-blur-md rounded-t-2xl border-t border-white/10 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] pb-[env(safe-area-inset-bottom)]' 
                     : 'absolute top-4 left-4 bottom-4 w-80 bg-black/60 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl'
                 }
                 ${isOpen
                     ? (isMobile ? 'translate-y-0' : 'translate-x-0')
-                    : (isMobile ? 'translate-y-[calc(100%-55px)]' : '-translate-x-[calc(100%+20px)]')
+                    : (isMobile ? 'translate-y-[calc(100%-55px-env(safe-area-inset-bottom))]' : '-translate-x-[calc(100%+20px)]')
                 }
             `}
             // style={isMobile && dragStartRef.current ? { transform: `translateY(${dragTranslateY}px)` } : undefined}

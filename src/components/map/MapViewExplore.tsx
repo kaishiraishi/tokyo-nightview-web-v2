@@ -1633,7 +1633,7 @@ export function MapViewExplore({
             {/* Bottom Right Controls */}
             <div className={`absolute right-6 flex items-end gap-4 md:right-8 z-[7000] pointer-events-auto transition-all duration-300 ${
                 isMobile 
-                    ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0 pointer-events-none' : 'bottom-20') 
+                    ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0 pointer-events-none' : 'bottom-[calc(80px+env(safe-area-inset-bottom))]') 
                     : 'bottom-6 md:bottom-8'
             }`}>
                 <div className="relative flex flex-col items-end gap-2">
