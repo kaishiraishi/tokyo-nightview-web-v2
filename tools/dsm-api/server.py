@@ -29,7 +29,11 @@ app = FastAPI(title="DSM Profile API (TerrainRGB)", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://kaisiraishi.github.io"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://kaisiraishi.github.io",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,11 +162,18 @@ def health_check():
         "status": "ok",
         "backend": "terrain-rgb-tiles",
         "tile_dir": TILE_DIR,
+        "tile_dir_exists": os.path.exists(TILE_DIR),
         "zoom": ZOOM_LEVEL
     }
 
 @app.post("/profile", response_model=ProfileResponse)
 def get_profile(req: ProfileRequest):
+    if not os.path.exists(TILE_DIR):
+        raise HTTPException(
+            status_code=500, 
+            detail=f"DSM Tile directory not found: {TILE_DIR}"
+        )
+    
     if len(req.start) != 2 or len(req.end) != 2:
         raise HTTPException(status_code=400, detail="start/end must be [lng, lat]")
 
