@@ -1,4 +1,5 @@
-#!/usr/bin/env python3"""
+#!/usr/bin/env python3
+"""
 DSM API Server - TerrainRGB Backend
 - Uses local TerrainRGB tiles (XYZ) instead of a single GeoTIFF
 - Zoom level fixed at 14 for max precision
