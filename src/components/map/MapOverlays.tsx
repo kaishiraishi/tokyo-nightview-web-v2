@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import type maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { LineLayer, ScatterplotLayer, GeoJsonLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { GL } from '@luma.gl/constants';
 import type { LngLat, ProfileResponse, RayResult, FanRayResult } from '../../types/profile';
@@ -121,6 +121,26 @@ export function MapOverlays({
         blendFunc: [GL.SRC_ALPHA, GL.ONE, GL.ONE, GL.ONE] as [number, number, number, number],
         depthTest: false,
     };
+
+    // 東京都の境界・ハイライトレイヤー
+    const boundaryLayer = useMemo(() => {
+        return new GeoJsonLayer({
+            id: 'tokyo-boundary-highlight',
+            data: 'https://raw.githubusercontent.com/kaishiraishi/tokyo-boundary-geojson/main/tokyo_boundary_4326.geojson',
+            pickable: false,
+            stroked: true,
+            filled: true,
+            lineWidthUnits: 'pixels',
+            getFillColor: [109, 40, 217, 5], // 内部を極めて薄いバイオレットで塗りつぶし
+            getLineColor: [167, 139, 250, 200], // Violet-400 の境界線
+            getLineWidth: 2,
+            lineCapRounded: true,
+            lineJoinRounded: true,
+            parameters: {
+                depthTest: false
+            }
+        });
+    }, []);
 
     // Initialize Deck.gl Overlay
     useEffect(() => {
@@ -681,18 +701,16 @@ export function MapOverlays({
     useEffect(() => {
         if (!overlayRef.current) return;
         
-        // 描画順序: VIIRS(背景) -> Posts(中間) -> Scan(最前面)
-        // ※ Deck.glは配列の後ろにあるものが手前に描画されますが、
-        // 3D空間では深度テスト(depthTest)が有効ならZ座標次第です。
-        // Postsは今回 depthTest: false にしたので、間違いなく描画順で手前に来ます。
+        // 描画順序: Boundary(最背面) -> VIIRS -> Posts -> Scan(最前面)
         overlayRef.current.setProps({
             layers: [
+                boundaryLayer,
                 ...viirsLayers,
                 ...postsLayers,
                 ...scanLayers
             ]
         });
-    }, [viirsLayers, postsLayers, scanLayers]);
+    }, [boundaryLayer, viirsLayers, postsLayers, scanLayers]);
 
     // Update GeoJSON markers (Source, Target, Current, Hover)
     useEffect(() => {

@@ -19,6 +19,7 @@ import type { FanConfig, ScanMode, ScanStep } from './types';
 import { MOCK_POSTS } from '../../data/mockPosts';
 import { listPosts, createPost, uploadPhoto, type Post } from '../../lib/postsApi';
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
+import { unifiedBtn } from '../../styles/ui';
 
 const NORTH_THRESHOLD_DEG = 5;
 const SIGHT_ANGLE_PRESETS = {
@@ -1486,10 +1487,8 @@ export function MapViewExplore({
 
             {/* Location Selection Confirmation Button */}
             {isMobile && (scanStep === 'selecting_source' || scanStep === 'selecting_target') && (
-                <div className={`absolute left-1/2 -translate-x-1/2 z-[7000] flex flex-col items-center gap-2 pointer-events-none transition-all duration-300 ${
-                    isMobile 
-                        ? (isLayerMenuOpen ? 'bottom-[-100px] opacity-0' : 'bottom-20') 
-                        : 'bottom-10'
+                <div className={`absolute left-1/2 -translate-x-1/2 z-[8000] transition-all duration-300 ${
+                    isLayerMenuOpen ? 'bottom-[-100px] opacity-0 pointer-events-none' : 'bottom-[calc(80px+env(safe-area-inset-bottom))]'
                 }`}>
                     <button
                         onClick={() => {
@@ -1517,10 +1516,10 @@ export function MapViewExplore({
                                 }
                             }
                         }}
-                        className="pointer-events-auto bg-violet-700 text-white px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-violet-600 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
+                        className={`${unifiedBtn} pointer-events-auto bg-violet-700 text-white hover:bg-violet-600`}
                     >
-                        <MapPin className="w-4 h-4" />
-                        {scanStep === 'selecting_source' ? '観測地点を確定' : '目標地点を確定'}
+                        <MapPin className="w-4 h-4 shrink-0" />
+                        <span>{scanStep === 'selecting_source' ? '観測地点を確定' : '目標地点を確定'}</span>
                     </button>
                 </div>
             )}
@@ -1662,10 +1661,10 @@ export function MapViewExplore({
                 }`}>
                     <button
                         onClick={handleCommitStep}
-                        className="pointer-events-auto bg-violet-700 text-white px-8 py-3 rounded-full font-bold shadow-2xl hover:bg-violet-600 active:scale-95 transition-all text-sm flex items-center gap-2 border-2 border-black/10"
+                        className={`${unifiedBtn} pointer-events-auto bg-violet-700 text-white hover:bg-violet-600`}
                     >
-                        <Zap className="w-4 h-4" />
-                        分析を開始
+                        <Zap className="w-4 h-4 shrink-0" />
+                        <span>分析を開始</span>
                     </button>
                 </div>
             )}
@@ -1682,7 +1681,7 @@ export function MapViewExplore({
                         ref={postButtonRef}
                         type="button"
                         onClick={() => setIsPostModalOpen((prev) => !prev)}
-                        className="group bg-black/60 backdrop-blur-md border border-violet-700/60 text-white rounded-full shadow-lg h-11 w-11 hover:bg-violet-700/20 hover:border-violet-600 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                        className="group bg-black/60 backdrop-blur-md border border-violet-700/60 text-white rounded-full shadow-lg h-[var(--btn-h)] w-[var(--btn-h)] hover:bg-violet-700/20 hover:border-violet-600 active:scale-95 transition-all duration-200 flex items-center justify-center"
                         aria-label="投稿する"
                         aria-pressed={isPostModalOpen}
                         disabled={!isSupabaseConfigured}

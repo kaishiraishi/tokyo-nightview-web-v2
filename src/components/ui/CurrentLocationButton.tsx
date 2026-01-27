@@ -18,13 +18,13 @@ export function CurrentLocationButton({ onClick, isNorthUp, disabled, className 
                 group
                 bg-black/60 backdrop-blur-md border border-white/10
                 text-white rounded-full shadow-lg
-                h-11 w-11
+                h-[var(--btn-h)] w-[var(--btn-h)]
                 hover:bg-white/10 hover:border-white/20
                 active:scale-95
                 disabled:opacity-50 disabled:cursor-not-allowed
                 transition-all duration-200
                 flex items-center justify-center
-                ${className || 'absolute bottom-6 right-6 md:bottom-8 md:right-8'}
+                ${className || `absolute bottom-[calc(24px+env(safe-area-inset-bottom))] right-6 md:bottom-8 md:right-8`}
             `}
         >
             {isNorthUp ? (
