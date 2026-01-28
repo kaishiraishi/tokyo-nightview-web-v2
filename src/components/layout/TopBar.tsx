@@ -2,7 +2,6 @@ import { Search, Sparkles, User } from 'lucide-react';
 import { useState } from 'react';
 import type { GeocodingResult } from '../../lib/api/geocodingApi';
 import { AppMenu } from '../menu/AppMenu';
-import { MOCK_POSTS } from '../../data/mockPosts';
 import type { FanConfig } from '../map/types';
 
 // Mock stats for the profile menu
@@ -30,6 +29,8 @@ type TopBarProps = {
     onStepClick?: (key: string) => void;
     fanConfig?: FanConfig;
     onFanConfigChange?: (config: FanConfig) => void;
+    onViewPosts?: () => void;
+    postCount?: number;
 };
 
 export function TopBar({
@@ -48,6 +49,8 @@ export function TopBar({
     onStepClick,
     fanConfig,
     onFanConfigChange,
+    onViewPosts,
+    postCount = 0,
 }: TopBarProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -182,8 +185,11 @@ export function TopBar({
                 memberId="No.0001"
                 foundCount={MOCK_PROFILE_STATS.foundCount}
                 favoriteCount={MOCK_PROFILE_STATS.favoriteCount}
-                postCount={MOCK_POSTS.length}                fanConfig={fanConfig}
-                onFanConfigChange={onFanConfigChange}            />
+                postCount={postCount}
+                onViewPosts={onViewPosts}
+                fanConfig={fanConfig}
+                onFanConfigChange={onFanConfigChange}
+            />
         </div>
     );
 }

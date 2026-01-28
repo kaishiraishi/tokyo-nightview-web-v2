@@ -22,6 +22,7 @@ type AppMenuProps = {
   foundCount: number;
   favoriteCount: number;
   postCount: number;
+  onViewPosts?: () => void;
   fanConfig?: FanConfig;
   onFanConfigChange?: (config: FanConfig) => void;
 };
@@ -34,6 +35,7 @@ export function AppMenu({
   foundCount,
   favoriteCount,
   postCount,
+  onViewPosts,
   fanConfig,
   onFanConfigChange,
 }: AppMenuProps) {
@@ -135,6 +137,10 @@ export function AppMenu({
                     icon={<Image size={20} className="text-purple-400" />} 
                     label="投稿" 
                     value={postCount} 
+                    onClick={() => {
+                        onViewPosts?.();
+                        onClose();
+                    }}
                     isLast
                   />
                 </div>

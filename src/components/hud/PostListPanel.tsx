@@ -67,8 +67,17 @@ export function PostListPanel({
                                     <img 
                                         src={post.photos[0].url} 
                                         alt="投稿画像" 
-                                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
+                                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
                                         loading="lazy"
+                                        onError={(e) => {
+                                            // 画像読み込みエラー時のフォールバック
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                            (e.target as HTMLImageElement).parentElement?.classList.add('flex', 'items-center', 'justify-center');
+                                            const icon = document.createElement('div');
+                                            icon.className = 'text-white/20 text-[10px]';
+                                            icon.innerText = 'NO IMG';
+                                            (e.target as HTMLImageElement).parentElement?.appendChild(icon);
+                                        }}
                                     />
                                 ) : (
                                     <ImageIcon className="w-8 h-8 opacity-20" />

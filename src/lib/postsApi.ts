@@ -123,17 +123,15 @@ export async function createPost(params: {
     photoUrl?: string;
     lat?: number;
     lng?: number;
-}): Promise<Post | null> {
+}): Promise<Post> {
     if (!isSupabaseConfigured || !supabase) {
-        console.error('[postsApi] Supabase 未設定のため投稿できません');
-        return null;
+        throw new Error('Supabase が設定されていないため投稿できません');
     }
 
     const { message, photoUrl, lat, lng } = params;
 
     if (!message.trim()) {
-        console.error('[postsApi] message は必須です');
-        return null;
+        throw new Error('メッセージは必須です');
     }
 
     const { data, error } = await supabase
@@ -149,7 +147,7 @@ export async function createPost(params: {
 
     if (error) {
         console.error('[postsApi] createPost エラー:', error);
-        return null;
+        throw new Error(`投稿の保存に失敗しました: ${error.message}`);
     }
 
     return dbPostToPost(data as DbPost);
@@ -158,10 +156,9 @@ export async function createPost(params: {
 /**
  * 写真を Supabase Storage にアップロード（自動リサイズ付き）
  */
-export async function uploadPhoto(file: File): Promise<string | null> {
+export async function uploadPhoto(file: File): Promise<string> {
     if (!isSupabaseConfigured || !supabase) {
-        console.error('[postsApi] Supabase 未設定のためアップロードできません');
-        return null;
+        throw new Error('Supabase が設定されていないためアップロードできません');
     }
 
     // 画像をリサイズ（最大1200x1200、JPEG圧縮）
@@ -176,22 +173,23 @@ export async function uploadPhoto(file: File): Promise<string | null> {
 
     // ファイル名の生成 (現在時刻 + ランダム文字列、リサイズ後はJPEG固定)
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}.jpg`;
-    const filePath = `post-photos/${fileName}`;
-
+    const filePath = `${fileName}`;
     const { error: uploadError } = await supabase.storage
-        .from('images') // 'images' バケットを使用（あらかじめ作成しておく必要があります）
+        .from('post-photos') // バケット名を 'post-photos' に統一
         .upload(filePath, uploadData, {
             contentType: 'image/jpeg',
+            cacheControl: '3600',
+            upsert: false
         });
 
     if (uploadError) {
         console.error('[postsApi] uploadPhoto エラー:', uploadError);
-        return null;
+        throw new Error(`画像のアップロードに失敗しました: ${uploadError.message}`);
     }
 
     // 公開URLを取得
     const { data } = supabase.storage
-        .from('images')
+        .from('post-photos')
         .getPublicUrl(filePath);
 
     return data.publicUrl;

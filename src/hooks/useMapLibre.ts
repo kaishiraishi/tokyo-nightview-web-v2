@@ -334,8 +334,8 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
         const map = new maplibregl.Map({
             container: containerRef.current,
             style: DEFAULT_STYLE,
-            center: [139.76, 35.68],
-            zoom: 9,
+            center: [139.5, 35.65],
+            zoom: 8.5,
             pitch: 0,
             bearing: 0,
             maxPitch: 85,
@@ -352,7 +352,7 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
                 padding: { top: 40, bottom: 40, left: 40, right: 40 },
                 pitch: 0,
                 bearing: 0,
-                duration: 0,
+                duration: 2000,
                 maxZoom: 11,
             });
             ensureOverlays(map);

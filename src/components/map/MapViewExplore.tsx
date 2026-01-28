@@ -122,8 +122,6 @@ export function MapViewExplore({
     }, [locateError]);
 
     const hasAutoSetSourceRef = useRef(false);
-    const hasInitialFlyRef = useRef(false);
-
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
     const isNorthUp = Math.abs(mapBearing) <= NORTH_THRESHOLD_DEG;
@@ -363,12 +361,24 @@ export function MapViewExplore({
     const [postMessage, setPostMessage] = useState('');
     const [postPhotoUrl, setPostPhotoUrl] = useState('');
     const [postPhotoFile, setPostPhotoFile] = useState<File | null>(null);
+    const [postPhotoPreview, setPostPhotoPreview] = useState<string | null>(null);
     const [isPosting, setIsPosting] = useState(false);
     const [postLocationMode, setPostLocationMode] = useState<'current' | 'pin'>('current');
     const [postPinLocation, setPostPinLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [isPinSelecting, setIsPinSelecting] = useState(false);
     const postModalRef = useRef<HTMLDivElement | null>(null);
     const postButtonRef = useRef<HTMLButtonElement | null>(null);
+
+    // 画像プレビューの生成
+    useEffect(() => {
+        if (!postPhotoFile) {
+            setPostPhotoPreview(null);
+            return;
+        }
+        const url = URL.createObjectURL(postPhotoFile);
+        setPostPhotoPreview(url);
+        return () => URL.revokeObjectURL(url);
+    }, [postPhotoFile]);
 
     // VIIRS controls
     const [viirsEnabled, setViirsEnabled] = useState(true);
@@ -624,32 +634,30 @@ export function MapViewExplore({
 
             // 画像ファイルが選択されている場合はアップロード
             if (postPhotoFile) {
-                const uploadedUrl = await uploadPhoto(postPhotoFile);
-                if (uploadedUrl) {
-                    finalPhotoUrl = uploadedUrl;
-                }
+                finalPhotoUrl = await uploadPhoto(postPhotoFile);
             }
 
-            const newPost = await createPost({
+            await createPost({
                 message: postMessage.trim(),
                 photoUrl: finalPhotoUrl || undefined,
                 lat: postLat,
                 lng: postLng,
             });
 
-            if (newPost) {
-                // 成功したら一覧を再取得
-                await loadPosts();
-                // フォームリセット
-                setPostMessage('');
-                setPostPhotoUrl('');
-                setPostPhotoFile(null);
-                setPostLocationMode('current');
-                setPostPinLocation(null);
-                setIsPostModalOpen(false);
-            }
+            // 成功したら一覧を再取得
+            await loadPosts();
+
+            // フォームリセット
+            setPostMessage('');
+            setPostPhotoUrl('');
+            setPostPhotoFile(null);
+            setPostLocationMode('current');
+            setPostPinLocation(null);
+            setIsPostModalOpen(false);
         } catch (err) {
             console.error('[handleSubmitPost] エラー:', err);
+            const message = err instanceof Error ? err.message : '予期せぬエラーが発生しました';
+            alert(message);
         } finally {
             setIsPosting(false);
         }
@@ -756,20 +764,6 @@ export function MapViewExplore({
             hasAutoSetSourceRef.current = true;
         }
     }, [currentLocation, sourceLocation]);
-
-    useEffect(() => {
-        if (!map || !isLoaded) return;
-        if (hasInitialFlyRef.current) return;
-        hasInitialFlyRef.current = true;
-
-        map.flyTo({
-            center: [139.77, 35.68],
-            zoom: 14,
-            pitch: 60,
-            bearing: -20,
-            duration: 1200,
-        });
-    }, [map, isLoaded]);
 
     // Handle search target flyTo
     useEffect(() => {
@@ -1543,6 +1537,8 @@ export function MapViewExplore({
                 onStepClick={handleStepClick}
                 fanConfig={fanConfig}
                 onFanConfigChange={setFanConfig}
+                onViewPosts={() => onModeChange('analyze')}
+                postCount={posts.length}
             />
 
             {/* Error Notifications - Align with TopBar on Desktop */}
@@ -1684,8 +1680,7 @@ export function MapViewExplore({
                         className="group bg-black/60 backdrop-blur-md border border-violet-700/60 text-white rounded-full shadow-lg h-[var(--btn-h)] w-[var(--btn-h)] hover:bg-violet-700/20 hover:border-violet-600 active:scale-95 transition-all duration-200 flex items-center justify-center"
                         aria-label="投稿する"
                         aria-pressed={isPostModalOpen}
-                        disabled={!isSupabaseConfigured}
-                        title={isSupabaseConfigured ? '投稿する' : 'Supabase未設定'}
+                        title="投稿する"
                     >
                         <Camera className="w-5 h-5 text-violet-300 group-hover:scale-110 transition-transform" />
                     </button>
@@ -1695,6 +1690,12 @@ export function MapViewExplore({
                                     className="absolute right-0 bottom-14 w-72 rounded-xl border border-white/10 bg-black/80 p-4 shadow-lg backdrop-blur-md"
                                 >
                                     <div className="text-sm text-white/90 font-medium mb-3">夜景を投稿</div>
+                                    {!isSupabaseConfigured && (
+                                        <div className="mb-3 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-200 flex items-start gap-2">
+                                            <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                                            <span>Supabaseが設定されていないため、実際の投稿はできません。</span>
+                                        </div>
+                                    )}
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-xs text-white/60 mb-1">
@@ -1729,25 +1730,30 @@ export function MapViewExplore({
                                                 />
                                                 <label
                                                     htmlFor="photo-upload"
-                                                    className="flex items-center justify-center w-full rounded-lg border border-dashed border-white/20 bg-white/5 px-3 py-4 text-xs text-white/60 hover:bg-white/10 hover:border-violet-700/50 cursor-pointer transition-all"
+                                                    className="flex flex-col items-center justify-center w-full rounded-lg border border-dashed border-white/20 bg-white/5 py-4 text-xs text-white/60 hover:bg-white/10 hover:border-violet-700/50 cursor-pointer transition-all overflow-hidden"
                                                 >
-                                                    {postPhotoFile ? (
-                                                        <span className="text-violet-300 flex items-center gap-2">
-                                                            <ImageIcon className="w-4 h-4" />
-                                                            <span className="truncate max-w-[200px]">{postPhotoFile.name}</span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    setPostPhotoFile(null);
-                                                                }}
-                                                                className="text-white/40 hover:text-white"
-                                                            >
-                                                                ✕
-                                                            </button>
-                                                        </span>
+                                                    {postPhotoPreview || postPhotoUrl ? (
+                                                        <div className="relative w-full aspect-video rounded-md overflow-hidden bg-black/40">
+                                                            <img src={postPhotoPreview || postPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
+                                                            {(postPhotoPreview || postPhotoUrl) && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.preventDefault();
+                                                                        setPostPhotoFile(null);
+                                                                        setPostPhotoUrl('');
+                                                                    }}
+                                                                    className="absolute top-1 right-1 bg-black/60 rounded-full p-1 text-white hover:bg-black/80"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     ) : (
-                                                        <span>画像を選択してください</span>
+                                                        <div className="flex flex-col items-center gap-2">
+                                                            <ImageIcon className="w-6 h-6 opacity-30" />
+                                                            <span>画像を選択してください</span>
+                                                        </div>
                                                     )}
                                                 </label>
 
@@ -1822,7 +1828,7 @@ export function MapViewExplore({
                                             <button
                                                 type="button"
                                                 onClick={handleSubmitPost}
-                                                disabled={!postMessage.trim() || isPosting}
+                                                disabled={!postMessage.trim() || isPosting || !isSupabaseConfigured}
                                                 className="flex-1 rounded-lg bg-violet-700 py-2 text-sm font-medium text-white hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                             >
                                                 {isPosting ? '投稿中...' : <><Send className="w-4 h-4" /> 投稿する</>}
