@@ -10,6 +10,8 @@ type ScanControlPanelProps = {
     // Layer settings props
     viirsEnabled: boolean;
     setViirsEnabled: (enabled: boolean) => void;
+    potentialEnabled: boolean;
+    setPotentialEnabled: (enabled: boolean) => void;
     aerialEnabled: boolean;
     setAerialEnabled: (enabled: boolean) => void;
     // scanStatus is kept but many fields might be less valid if we remove the wizard view.
@@ -33,6 +35,8 @@ export function ScanControlPanel({
     onScanModeChange,
     viirsEnabled,
     setViirsEnabled,
+    potentialEnabled,
+    setPotentialEnabled,
     aerialEnabled,
     setAerialEnabled,
     scanStatus,
@@ -75,6 +79,8 @@ export function ScanControlPanel({
             <LayerSettings
                 viirsEnabled={viirsEnabled}
                 setViirsEnabled={setViirsEnabled}
+                potentialEnabled={potentialEnabled}
+                setPotentialEnabled={setPotentialEnabled}
                 aerialEnabled={aerialEnabled}
                 setAerialEnabled={setAerialEnabled}
             />

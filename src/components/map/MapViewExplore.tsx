@@ -5,7 +5,7 @@ import { LayerMenu } from '../layout/LayerMenu';
 import { TopBar } from '../layout/TopBar';
 import { ScanControlPanel } from '../hud/ScanControlPanel';
 import { PostListPanel } from '../hud/PostListPanel';
-import { useMapLibre } from '../../hooks/useMapLibre';
+import { useMapLibre, POTENTIAL_LAYER_ID } from '../../hooks/useMapLibre';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { MapOverlays } from './MapOverlays';
 import { fetchProfile } from '../../lib/api/dsmApi';
@@ -384,6 +384,9 @@ export function MapViewExplore({
     const [viirsEnabled, setViirsEnabled] = useState(true);
     const viirsUpdateTimerRef = useRef<number | null>(null);
     const viirsRequestIdRef = useRef(0);
+
+    // Night View Potential controls
+    const [potentialEnabled, setPotentialEnabled] = useState(false);
 
     // Aerial Photo controls
     const [aerialEnabled, setAerialEnabled] = useState(false);
@@ -893,6 +896,18 @@ export function MapViewExplore({
             );
         }
     }, [map, isLoaded, aerialEnabled]);
+
+    // Update Night View Potential layer visibility
+    useEffect(() => {
+        if (!map || !isLoaded) return;
+        if (map.getLayer(POTENTIAL_LAYER_ID)) {
+            map.setLayoutProperty(
+                POTENTIAL_LAYER_ID,
+                'visibility',
+                potentialEnabled ? 'visible' : 'none'
+            );
+        }
+    }, [map, isLoaded, potentialEnabled]);
 
     useEffect(() => {
         if (!map || !isLoaded) return;
@@ -1581,6 +1596,8 @@ export function MapViewExplore({
                         onScanModeChange={handleScanModeChange}
                         viirsEnabled={viirsEnabled}
                         setViirsEnabled={setViirsEnabled}
+                        potentialEnabled={potentialEnabled}
+                        setPotentialEnabled={setPotentialEnabled}
                         aerialEnabled={aerialEnabled}
                         setAerialEnabled={setAerialEnabled}
                         scanStatus={{
@@ -1602,6 +1619,8 @@ export function MapViewExplore({
                         // isLoading={isPostsLoading} // TODO: Add loading state to postsApi
                         viirsEnabled={viirsEnabled}
                         setViirsEnabled={setViirsEnabled}
+                        potentialEnabled={potentialEnabled}
+                        setPotentialEnabled={setPotentialEnabled}
                         aerialEnabled={aerialEnabled}
                         setAerialEnabled={setAerialEnabled}
                         onPostClick={(post) => {

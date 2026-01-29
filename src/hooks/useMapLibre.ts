@@ -32,6 +32,9 @@ const TERRAIN_EXAGGERATION = 1.8;
 const VIIRS_SOURCE_ID = 'viirs-nightlight';
 const VIIRS_LAYER_ID = 'viirs-nightlight-layer';
 
+export const POTENTIAL_SOURCE_ID = 'potential-nightview';
+export const POTENTIAL_LAYER_ID = 'potential-nightview-layer';
+
 const AERIAL_SOURCE_ID = 'aerial-photo';
 const AERIAL_LAYER_ID = 'aerial-photo-layer';
 const AERIAL_TILE_URL = 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg';
@@ -61,6 +64,35 @@ function addVIIRSNightLight(map: maplibregl.Map) {
             },
         });
         console.log('[VIIRS] Layer added as hidden');
+    }
+}
+
+function addPotentialLayer(map: maplibregl.Map) {
+    if (!map.getSource(POTENTIAL_SOURCE_ID)) {
+        map.addSource(POTENTIAL_SOURCE_ID, {
+            type: 'raster',
+            tiles: [`${import.meta.env.BASE_URL}NightViewPotential_tiles/{z}/{x}/{y}.png`],
+            tileSize: 256,
+            minzoom: 10,
+            maxzoom: 14,
+        });
+        console.log('[Potential] Source added');
+    }
+
+    if (!map.getLayer(POTENTIAL_LAYER_ID)) {
+        const firstSymbolId = map.getStyle().layers?.find((l) => l.type === 'symbol')?.id;
+        map.addLayer({
+            id: POTENTIAL_LAYER_ID,
+            type: 'raster',
+            source: POTENTIAL_SOURCE_ID,
+            layout: {
+                visibility: 'none',
+            },
+            paint: {
+                'raster-opacity': 0.8,
+            },
+        }, firstSymbolId);
+        console.log('[Potential] Layer added');
     }
 }
 
@@ -359,6 +391,7 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addPlateauExtrusion(map);
             addVIIRSNightLight(map);
+            addPotentialLayer(map);
             addAerialPhoto(map);
 
             // Mask non-Tokyo areas
@@ -374,6 +407,7 @@ export function useMapLibre(containerRef: RefObject<HTMLDivElement>) {
             console.log('[Map] Style reloaded');
             addTerrain(map, gsiTerrainSource, TERRAIN_EXAGGERATION);
             addVIIRSNightLight(map);
+            addPotentialLayer(map);
             addAerialPhoto(map);
             addPlateauExtrusion(map);
 

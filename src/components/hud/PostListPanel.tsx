@@ -9,6 +9,8 @@ type PostListPanelProps = {
     // Layer settings props
     viirsEnabled: boolean;
     setViirsEnabled: (enabled: boolean) => void;
+    potentialEnabled: boolean;
+    setPotentialEnabled: (enabled: boolean) => void;
     aerialEnabled: boolean;
     setAerialEnabled: (enabled: boolean) => void;
 };
@@ -19,6 +21,8 @@ export function PostListPanel({
     onPostClick,
     viirsEnabled,
     setViirsEnabled,
+    potentialEnabled,
+    setPotentialEnabled,
     aerialEnabled,
     setAerialEnabled
 }: PostListPanelProps) {
@@ -49,6 +53,8 @@ export function PostListPanel({
             <LayerSettings
                 viirsEnabled={viirsEnabled}
                 setViirsEnabled={setViirsEnabled}
+                potentialEnabled={potentialEnabled}
+                setPotentialEnabled={setPotentialEnabled}
                 aerialEnabled={aerialEnabled}
                 setAerialEnabled={setAerialEnabled}
             />
